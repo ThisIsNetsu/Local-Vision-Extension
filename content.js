@@ -412,9 +412,11 @@
   let currentAnalysis = "", ctxModal = null;
   let currentHistoryCount = 0;
   let analysisEnabled = true;
+  let ignoreSfx = false;
   let lastText = "";
   let globalBox = null, globalStatus = null, globalTextarea = null;
   let orderAuto = null, orderRtl = null, orderTtb = null;
+  let ignoreSfxToggle = null;
   let styleSelect = null;
   let warnMap = {};
   const noteMap = new Map();
@@ -481,10 +483,14 @@
         orderRtl.checked = !!rtl;
         orderTtb.checked = ttb !== false;
       }
+      if (resp?.ignoreSfx != null && ignoreSfxToggle) {
+        ignoreSfxToggle.checked = !!resp.ignoreSfx;
+        ignoreSfx = !!resp.ignoreSfx;
+      }
     } catch {}
   }
 
-  function showOverlay(imageUrl, historyCount, analysisFlag, styleId) {
+  function showOverlay(imageUrl, historyCount, analysisFlag, styleId, ignoreSfxFlag) {
     closeOverlay();
     injectCSS();
     isStreaming = true;
@@ -494,6 +500,7 @@
     lastText = "";
     warnMap = {};
     analysisEnabled = analysisFlag !== false;
+    ignoreSfx = ignoreSfxFlag === true;
     prevOverflow = document.documentElement.style.overflow;
     prevBodyOverflow = document.body.style.overflow;
     document.documentElement.style.overflow = "hidden";
@@ -615,7 +622,12 @@
     orderTtb.checked = true;
     const orderTtbLabel = document.createElement("label");
     orderTtbLabel.append(orderTtb, document.createTextNode("Top-to-bottom"));
-    orderRow.append(orderTitle, orderAutoLabel, orderRtlLabel, orderTtbLabel);
+    const ignoreSfxLabel = document.createElement("label");
+    ignoreSfxToggle = document.createElement("input");
+    ignoreSfxToggle.type = "checkbox";
+    ignoreSfxToggle.checked = ignoreSfx;
+    ignoreSfxLabel.append(ignoreSfxToggle, document.createTextNode("Ignore SFX"));
+    orderRow.append(orderTitle, orderAutoLabel, orderRtlLabel, orderTtbLabel, ignoreSfxLabel);
     const gActions = document.createElement("div");
     gActions.className = "vtl-global-actions";
     const gApply = Object.assign(document.createElement("button"), { className: "vtl-btn", textContent: "Apply" });
@@ -655,6 +667,11 @@
     orderTtb.addEventListener("change", () => {
       if (!orderTtb.checked) orderAuto.checked = false;
       syncReadingOrder();
+    });
+    ignoreSfxToggle.addEventListener("change", () => {
+      ignoreSfx = ignoreSfxToggle.checked;
+      browser.runtime.sendMessage({ action: "setIgnoreSfx", ignoreSfx });
+      render(lastText, isStreaming);
     });
     gRetry.onclick = () => {
       browser.runtime.sendMessage({ action: "retry" });
@@ -879,7 +896,7 @@
      ═══════════════════════════════════════════════════════ */
   function render(text, live) {
     if (!panelBody) return;
-    const blocks = parseBlocks(text);
+    const blocks = parseBlocks(text).filter(block => !ignoreSfx || block.cat !== "SFX");
 
     let html = buildAnalysisHTML();
 
@@ -1147,7 +1164,7 @@
   browser.runtime.onMessage.addListener(msg => {
     switch (msg.action) {
       case "showOverlay":
-        showOverlay(msg.imageUrl, msg.historyCount || 0, msg.analysisEnabled, msg.styleId);
+        showOverlay(msg.imageUrl, msg.historyCount || 0, msg.analysisEnabled, msg.styleId, msg.ignoreSfx);
         break;
       case "analysis":
         if (!analysisEnabled) break;

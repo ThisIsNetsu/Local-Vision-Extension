@@ -52,6 +52,10 @@ function getStyleId(tid) {
   return tabState[tid]?.styleId || DEFAULT_STYLE;
 }
 
+function getIgnoreSfx(tid) {
+  return tabState[tid]?.ignoreSfx ?? false;
+}
+
 function getReadingOrder(tid) {
   return tabState[tid]?.readingOrder || { auto: true, rtl: false, ttb: true };
 }
@@ -105,6 +109,16 @@ function filterForContext(translationText, analysis) {
   if (analysis) result += "Scene: " + analysis + "\n";
   if (kept.length) result += kept.join("\n");
   return result.trim();
+}
+
+function filterSfxBlocks(text) {
+  const blocks = parseBlocksForQA(text);
+  if (!blocks.length) return text;
+  const kept = blocks.filter(block => block.cat !== "SFX");
+  if (!kept.length) return "No translatable text found.";
+  return kept.map(block =>
+    `[${block.cat}]\nORIGINAL: ${block.orig}\nTRANSLATION: ${block.trans}`
+  ).join("\n\n");
 }
 
 // =================== Story registry (compact running context per tab) ===================
@@ -322,12 +336,25 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
   const styleId = getStyleId(tab.id);
 
   if (info.menuItemId === "vision-translate") {
-    try { await tell(tab.id, { action: "showOverlay", imageUrl, historyCount: hCount, analysisEnabled, styleId }); }
-    catch { await browser.tabs.executeScript(tab.id, { file: "content.js" }); await tell(tab.id, { action: "showOverlay", imageUrl, historyCount: hCount, analysisEnabled, styleId }); }
+    const ignoreSfx = getIgnoreSfx(tab.id);
+    try {
+      await tell(tab.id, { action: "showOverlay", imageUrl, historyCount: hCount, analysisEnabled, styleId, ignoreSfx });
+    } catch {
+      await browser.tabs.executeScript(tab.id, { file: "content.js" });
+      await tell(tab.id, { action: "showOverlay", imageUrl, historyCount: hCount, analysisEnabled, styleId, ignoreSfx });
+    }
     try {
       const b64 = await imageToBase64Jpeg(imageUrl, pageUrl);
       const prev = tabState[tab.id];
-      tabState[tab.id] = { b64, imageUrl, analysis: prev?.analysis || "", analysisEnabled, styleId, lastTranslation: prev?.lastTranslation || "" };
+      tabState[tab.id] = {
+        b64,
+        imageUrl,
+        analysis: prev?.analysis || "",
+        analysisEnabled,
+        styleId,
+        lastTranslation: prev?.lastTranslation || "",
+        ignoreSfx: prev?.ignoreSfx || false
+      };
       await streamTranslation(b64, tab.id, false);
     } catch (err) { tell(tab.id, { action: "error", message: friendlyError(err) }); }
 
@@ -355,15 +382,25 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       const analysisEnabled = getAnalysisEnabled(tabId);
       const styleId = getStyleId(tabId);
       try {
-        await tell(tabId, { action: "showOverlay", imageUrl: msg.imageUrl, historyCount: hCount, analysisEnabled, styleId });
+        const ignoreSfx = getIgnoreSfx(tabId);
+        await tell(tabId, { action: "showOverlay", imageUrl: msg.imageUrl, historyCount: hCount, analysisEnabled, styleId, ignoreSfx });
       } catch {
         await browser.tabs.executeScript(tabId, { file: "content.js" });
-        await tell(tabId, { action: "showOverlay", imageUrl: msg.imageUrl, historyCount: hCount, analysisEnabled, styleId });
+        const ignoreSfx = getIgnoreSfx(tabId);
+        await tell(tabId, { action: "showOverlay", imageUrl: msg.imageUrl, historyCount: hCount, analysisEnabled, styleId, ignoreSfx });
       }
       try {
         const b64 = await cropAndEncode(msg.imageUrl, msg.crop, msg.pageUrl);
         const prev = tabState[tabId];
-        tabState[tabId] = { b64, imageUrl: msg.imageUrl, analysis: prev?.analysis || "", analysisEnabled, styleId, lastTranslation: prev?.lastTranslation || "" };
+        tabState[tabId] = {
+          b64,
+          imageUrl: msg.imageUrl,
+          analysis: prev?.analysis || "",
+          analysisEnabled,
+          styleId,
+          lastTranslation: prev?.lastTranslation || "",
+          ignoreSfx: prev?.ignoreSfx || false
+        };
         await streamTranslation(b64, tabId, false);
       } catch (err) { tell(tabId, { action: "error", message: friendlyError(err) }); }
     })();
@@ -382,7 +419,17 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 
   if (msg.action === "setAnalysisEnabled") {
     const enabled = !!msg.enabled;
-    if (!tabState[tabId]) tabState[tabId] = { b64: null, imageUrl: null, analysis: "", analysisEnabled: enabled, styleId: DEFAULT_STYLE, lastTranslation: "" };
+    if (!tabState[tabId]) {
+      tabState[tabId] = {
+        b64: null,
+        imageUrl: null,
+        analysis: "",
+        analysisEnabled: enabled,
+        styleId: DEFAULT_STYLE,
+        lastTranslation: "",
+        ignoreSfx: false
+      };
+    }
     tabState[tabId].analysisEnabled = enabled;
     if (!enabled) tabState[tabId].analysis = "";
     return Promise.resolve({ analysisEnabled: enabled });
@@ -390,9 +437,37 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 
   if (msg.action === "setStyle") {
     const styleId = STYLE_PROFILES[msg.styleId] ? msg.styleId : DEFAULT_STYLE;
-    if (!tabState[tabId]) tabState[tabId] = { b64: null, imageUrl: null, analysis: "", analysisEnabled: true, styleId, lastTranslation: "" };
+    if (!tabState[tabId]) {
+      tabState[tabId] = {
+        b64: null,
+        imageUrl: null,
+        analysis: "",
+        analysisEnabled: true,
+        styleId,
+        lastTranslation: "",
+        ignoreSfx: false
+      };
+    }
     tabState[tabId].styleId = styleId;
     return Promise.resolve({ styleId });
+  }
+
+  if (msg.action === "setIgnoreSfx") {
+    const ignoreSfx = !!msg.ignoreSfx;
+    if (!tabState[tabId]) {
+      tabState[tabId] = {
+        b64: null,
+        imageUrl: null,
+        analysis: "",
+        analysisEnabled: true,
+        styleId: DEFAULT_STYLE,
+        lastTranslation: "",
+        ignoreSfx
+      };
+    } else {
+      tabState[tabId].ignoreSfx = ignoreSfx;
+    }
+    return Promise.resolve({ ignoreSfx });
   }
 
   if (msg.action === "setGlobalInstructions") {
@@ -403,7 +478,15 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg.action === "setReadingOrder") {
     const order = msg.readingOrder || {};
     if (!tabState[tabId]) {
-      tabState[tabId] = { b64: null, imageUrl: null, analysis: "", analysisEnabled: true, styleId: DEFAULT_STYLE, lastTranslation: "" };
+      tabState[tabId] = {
+        b64: null,
+        imageUrl: null,
+        analysis: "",
+        analysisEnabled: true,
+        styleId: DEFAULT_STYLE,
+        lastTranslation: "",
+        ignoreSfx: false
+      };
     }
     tabState[tabId].readingOrder = {
       auto: order.auto !== false,
@@ -422,7 +505,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     return Promise.resolve({
       globalInstructions,
       styleId: getStyleId(tabId),
-      readingOrder: getReadingOrder(tabId)
+      readingOrder: getReadingOrder(tabId),
+      ignoreSfx: getIgnoreSfx(tabId)
     });
   }
 
@@ -772,6 +856,9 @@ async function streamTranslation(base64Url, tabId, isRetry) {
   const histPrefix = buildHistoryPrefix(tabId);
   const parts = [];
   if (globalInstructions) parts.push("GLOBAL INSTRUCTIONS:\n" + globalInstructions);
+  if (getIgnoreSfx(tabId)) {
+    parts.push("SFX FILTER:\nDo NOT output any entries in the [SFX] category. Skip sound effects entirely.");
+  }
   const styleBlock = buildStyleBlock(tabId);
   if (styleBlock) parts.push(styleBlock);
   if (histPrefix) parts.push(histPrefix);
@@ -836,6 +923,9 @@ async function streamTranslation(base64Url, tabId, isRetry) {
   let final = stripThink(full);
   final = final.replace(/\s*\/no_think\s*/gi, "");
   final = dedupeOutput(final) || "No translatable text found.";
+  if (getIgnoreSfx(tabId)) {
+    final = filterSfxBlocks(final);
+  }
 
   // Save last translation for chat context
   if (tabState[tabId]) tabState[tabId].lastTranslation = final;

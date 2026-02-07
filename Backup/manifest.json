@@ -1,0 +1,23 @@
+{
+  "manifest_version": 2,
+  "name": "VisionTranslate",
+  "version": "3.1.0",
+  "description": "Translate text in images using a local Qwen3-VL model via llama.cpp",
+  "permissions": [
+    "contextMenus",
+    "activeTab",
+    "webRequest",
+    "webRequestBlocking",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
