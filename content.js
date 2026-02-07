@@ -147,6 +147,14 @@
     }
     .vtl-global-actions { display:flex;gap:8px;align-items:center; }
     .vtl-global-status { font-size:11px;color:#484f58; }
+    .vtl-order {
+      display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;
+      font-size:11px;color:#8b949e;
+    }
+    .vtl-order label {
+      display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+    }
+    .vtl-order input { accent-color:#e94560; }
     /* ── analysis section ── */
     .vtl-analysis {
       margin:0 0 10px;border-radius:8px;
@@ -406,6 +414,7 @@
   let analysisEnabled = true;
   let lastText = "";
   let globalBox = null, globalStatus = null, globalTextarea = null;
+  let orderAuto = null, orderRtl = null, orderTtb = null;
   let styleSelect = null;
   let warnMap = {};
   const noteMap = new Map();
@@ -465,6 +474,12 @@
       }
       if (resp?.styleId && styleSelect) {
         styleSelect.value = resp.styleId;
+      }
+      if (resp?.readingOrder && orderAuto && orderRtl && orderTtb) {
+        const { auto, rtl, ttb } = resp.readingOrder;
+        orderAuto.checked = auto !== false;
+        orderRtl.checked = !!rtl;
+        orderTtb.checked = ttb !== false;
       }
     } catch {}
   }
@@ -582,6 +597,25 @@
     glabel.textContent = "Global Instructions (all tabs, resets on restart)";
     globalTextarea = document.createElement("textarea");
     globalTextarea.placeholder = 'e.g. "Ignore SFX" or "Character A is male"';
+    const orderRow = document.createElement("div");
+    orderRow.className = "vtl-order";
+    const orderTitle = document.createElement("span");
+    orderTitle.textContent = "Reading order:";
+    orderAuto = document.createElement("input");
+    orderAuto.type = "checkbox";
+    orderAuto.checked = true;
+    const orderAutoLabel = document.createElement("label");
+    orderAutoLabel.append(orderAuto, document.createTextNode("Auto"));
+    orderRtl = document.createElement("input");
+    orderRtl.type = "checkbox";
+    const orderRtlLabel = document.createElement("label");
+    orderRtlLabel.append(orderRtl, document.createTextNode("Right-to-left"));
+    orderTtb = document.createElement("input");
+    orderTtb.type = "checkbox";
+    orderTtb.checked = true;
+    const orderTtbLabel = document.createElement("label");
+    orderTtbLabel.append(orderTtb, document.createTextNode("Top-to-bottom"));
+    orderRow.append(orderTitle, orderAutoLabel, orderRtlLabel, orderTtbLabel);
     const gActions = document.createElement("div");
     gActions.className = "vtl-global-actions";
     const gApply = Object.assign(document.createElement("button"), { className: "vtl-btn", textContent: "Apply" });
@@ -598,6 +632,30 @@
         setTimeout(() => { if (globalStatus) globalStatus.textContent = ""; }, 1200);
       } catch {}
     };
+    function syncReadingOrder() {
+      if (!orderAuto || !orderRtl || !orderTtb) return;
+      const payload = {
+        auto: orderAuto.checked,
+        rtl: orderRtl.checked,
+        ttb: orderTtb.checked
+      };
+      browser.runtime.sendMessage({ action: "setReadingOrder", readingOrder: payload });
+    }
+    orderAuto.addEventListener("change", () => {
+      if (orderAuto.checked) {
+        orderRtl.checked = false;
+        orderTtb.checked = true;
+      }
+      syncReadingOrder();
+    });
+    orderRtl.addEventListener("change", () => {
+      if (orderRtl.checked) orderAuto.checked = false;
+      syncReadingOrder();
+    });
+    orderTtb.addEventListener("change", () => {
+      if (!orderTtb.checked) orderAuto.checked = false;
+      syncReadingOrder();
+    });
     gRetry.onclick = () => {
       browser.runtime.sendMessage({ action: "retry" });
     };
@@ -611,7 +669,7 @@
     };
 
     gActions.append(gApply, gRetry, gClear, globalStatus);
-    globalBox.append(glabel, globalTextarea, gActions);
+    globalBox.append(glabel, globalTextarea, orderRow, gActions);
 
     left.append(info, panelBody, globalBox);
 
