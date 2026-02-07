@@ -553,7 +553,7 @@
   let lastText = "";
   let lastIncomingText = "";
   let appendHistoryText = "";
-  let appendTranslations = false;
+  let appendTranslations = true;
   let appendWarnMap = {};
   let appendBaseCount = 0;
   let globalBox = null, globalStatus = null, globalTextarea = null;
@@ -656,7 +656,6 @@
     lastText = "";
     lastIncomingText = "";
     appendHistoryText = "";
-    appendTranslations = false;
     appendWarnMap = {};
     appendBaseCount = 0;
     warnMap = {};
