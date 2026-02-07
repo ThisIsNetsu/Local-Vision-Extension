@@ -76,12 +76,12 @@
       width:52%;background:#010409;
       display:flex;flex-direction:column;
       border-left:1px solid #30363d;padding:16px;flex-shrink:0;
-      overflow:hidden;gap:12px;
+      overflow:hidden;gap:12px;min-height:0;
     }
     .vtl-image-wrap {
-      flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+      flex:1 1 auto;display:flex;align-items:center;justify-content:center;
       background:#0d1117;border:1px solid #21262d;border-radius:8px;
-      padding:8px;position:relative;
+      padding:8px;position:relative;min-height:0;
     }
     .vtl-image-wrap.vtl-image-selecting {
       cursor:crosshair;
@@ -100,14 +100,14 @@
       background:rgba(233,69,96,.12);pointer-events:none;
     }
     .vtl-image-wrap img {
-      max-width:100%;max-height:54vh;
+      max-width:100%;max-height:100%;
       object-fit:contain;border-radius:6px;
       box-shadow:0 4px 16px rgba(0,0,0,.4);
     }
     .vtl-chat {
-      flex:1;display:flex;flex-direction:column;
+      flex:0 0 auto;display:flex;flex-direction:column;
       background:#0d1117;border:1px solid #21262d;border-radius:8px;
-      overflow:hidden;
+      overflow:auto;resize:vertical;min-height:140px;
     }
     .vtl-chat-hdr {
       padding:8px 12px;font-size:12px;color:#58a6ff;
@@ -398,6 +398,15 @@
   function joinLines(lines) {
     return lines.filter(Boolean).join(" ");
   }
+  function setChatDefaultHeight(chatEl) {
+    if (!chatEl) return;
+    requestAnimationFrame(() => {
+      const rect = chatEl.getBoundingClientRect();
+      if (!rect.height) return;
+      const target = Math.max(140, rect.height * 0.5);
+      chatEl.style.height = target + "px";
+    });
+  }
 
   /* ═══════════════════════════════════════════════════════
      Parser  (translation blocks only; skips stray [ANALYSIS])
@@ -670,6 +679,7 @@
 
     ctxBadge = document.createElement("span");
     updateBadge(historyCount || 0);
+    ctxBadge.title = "Stored context pages in this tab";
     ctxBadge.addEventListener("click", () => {
       if (currentHistoryCount > 0) openCtxViewer();
     });
@@ -689,7 +699,7 @@
     });
 
     const clearBtn = Object.assign(document.createElement("button"),
-      { className: "vtl-btn vtl-btn-clear", textContent: "🗑 Clear Context" });
+      { className: "vtl-btn vtl-btn-clear", textContent: "🗑 Clear Context", title: "Clear stored context for this tab" });
     clearBtn.onclick = async () => {
       try {
         await browser.runtime.sendMessage({ action: "clearContext" });
@@ -700,10 +710,10 @@
     };
 
     const analysisBtn = Object.assign(document.createElement("button"),
-      { className: "vtl-btn", textContent: analysisEnabled ? "🧠 Analysis: On" : "🧠 Analysis: Off" });
+      { className: "vtl-btn", textContent: analysisEnabled ? "🧠 Image Analysis: On" : "🧠 Image Analysis: Off", title: "Toggle image analysis section" });
     analysisBtn.onclick = async () => {
       analysisEnabled = !analysisEnabled;
-      analysisBtn.textContent = analysisEnabled ? "🧠 Analysis: On" : "🧠 Analysis: Off";
+      analysisBtn.textContent = analysisEnabled ? "🧠 Image Analysis: On" : "🧠 Image Analysis: Off";
       if (!analysisEnabled) currentAnalysis = "";
       render(lastText, isStreaming);
       try {
@@ -712,7 +722,7 @@
     };
 
     const retryBtn = Object.assign(document.createElement("button"),
-      { className: "vtl-btn", textContent: "⟳ Retry" });
+      { className: "vtl-btn", textContent: "⟳ Retry Translation", title: "Re-scan and retranslate the page" });
     retryBtn.onclick = () => {
       currentAnalysis = "";
       panelBody.innerHTML = '<div class="vtl-status vtl-pulse">Re-scanning image</div>';
@@ -720,10 +730,11 @@
     };
 
     const closeBtn = Object.assign(document.createElement("button"),
-      { className: "vtl-btn", textContent: "✕ Close" });
+      { className: "vtl-btn", textContent: "✕ Close", title: "Close overlay" });
     closeBtn.onclick = closeOverlay;
 
-    hdr.append(title, styleSelect, clearBtn, analysisBtn, retryBtn, closeBtn);
+    title.appendChild(clearBtn);
+    hdr.append(title, styleSelect, analysisBtn, retryBtn, closeBtn);
 
     const content = document.createElement("div");
     content.className = "vtl-content";
@@ -734,11 +745,11 @@
     const info = document.createElement("div");
     info.className = "vtl-info";
     info.innerHTML =
-      '<kbd>Retry</kbd> re-scans for missed text · <kbd>Click</kbd> a line to retranslate · Drag on the image to select a region · Drag lines to reorder, drop center to merge · Per-line notes auto-retranslate';
+      '<kbd>Retry Translation</kbd> re-scans for missed text · <kbd>Click</kbd> a line to retranslate · Drag on the image to select a region · Drag lines to reorder, drop center to merge · Per-line notes auto-retranslate';
 
     panelBody = document.createElement("div");
     panelBody.className = "vtl-body";
-    panelBody.innerHTML = '<div class="vtl-status vtl-pulse">Analysing scene</div>';
+    panelBody.innerHTML = '<div class="vtl-status vtl-pulse">Analyzing image</div>';
 
     // Global instructions box
     globalBox = document.createElement("div");
@@ -774,9 +785,9 @@
     orderRow.append(orderTitle, orderAutoLabel, orderRtlLabel, orderTtbLabel, ignoreSfxLabel);
     const gActions = document.createElement("div");
     gActions.className = "vtl-global-actions";
-    const gApply = Object.assign(document.createElement("button"), { className: "vtl-btn", textContent: "Apply" });
-    const gRetry = Object.assign(document.createElement("button"), { className: "vtl-btn", textContent: "Retranslate Page" });
-    const gClear = Object.assign(document.createElement("button"), { className: "vtl-btn vtl-btn-clear", textContent: "Clear" });
+    const gApply = Object.assign(document.createElement("button"), { className: "vtl-btn", textContent: "Apply", title: "Save global instructions" });
+    const gRetry = Object.assign(document.createElement("button"), { className: "vtl-btn", textContent: "Retranslate Page", title: "Retranslate using the current settings" });
+    const gClear = Object.assign(document.createElement("button"), { className: "vtl-btn vtl-btn-clear", textContent: "Clear", title: "Clear global instructions" });
     globalStatus = document.createElement("span");
     globalStatus.className = "vtl-global-status";
     globalStatus.textContent = "";
@@ -870,7 +881,7 @@
     const ctext = document.createElement("textarea");
     ctext.placeholder = "Ask or explain context here…";
     const csend = Object.assign(document.createElement("button"),
-      { className: "vtl-btn", textContent: "Send" });
+      { className: "vtl-btn", textContent: "Send", title: "Send to LLM notes" });
 
     async function sendChat() {
       const text = ctext.value.trim();
@@ -912,6 +923,7 @@
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
 
+    setChatDefaultHeight(chat);
     initGlobals();
   }
 
@@ -1119,7 +1131,7 @@
     return '<div class="vtl-analysis">' +
       '<div class="vtl-analysis-hdr" data-vtl-toggle>' +
         '<span class="vtl-analysis-arrow' + (analysisOpen ? " open" : "") + '">▶</span>' +
-        ' Scene Analysis' +
+        ' Image Analysis' +
       '</div>' +
       '<div class="vtl-analysis-body" style="display:' + (analysisOpen ? "block" : "none") + '">' +
         esc(currentAnalysis) +
