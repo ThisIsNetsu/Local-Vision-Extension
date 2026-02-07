@@ -369,18 +369,19 @@ browser.runtime.onMessage.addListener((msg, sender) => {
           ? prev.fullB64
           : await imageToBase64Jpeg(msg.imageUrl, msg.pageUrl);
         const b64 = await cropAndEncode(msg.imageUrl, msg.crop, msg.pageUrl);
-        tabState[tabId] = {
-          b64,
-          fullB64,
-          imageUrl: msg.imageUrl,
-          analysis: isSameImage ? (prev?.analysis || "") : "",
-          analysisImageUrl: isSameImage ? prev?.analysisImageUrl || null : null,
-          analysisEnabled,
-          styleId,
-          lastTranslation: prev?.lastTranslation || "",
-          lastContextImageUrl: prev?.lastContextImageUrl || null,
-          ignoreSfx: prev?.ignoreSfx || false
-        };
+      tabState[tabId] = {
+        b64,
+        fullB64,
+        imageUrl: msg.imageUrl,
+        analysis: isSameImage ? (prev?.analysis || "") : "",
+        analysisImageUrl: isSameImage ? prev?.analysisImageUrl || null : null,
+        analysisEnabled,
+        styleId,
+        lastTranslation: prev?.lastTranslation || "",
+        lastContextImageUrl: prev?.lastContextImageUrl || null,
+        ignoreSfx: prev?.ignoreSfx || false,
+        manualOrder: null
+      };
         await streamTranslation(b64, tabId, false, fullB64);
       } catch (err) { tell(tabId, { action: "error", message: friendlyError(err) }); }
     })();
@@ -390,6 +391,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg.action === "retry") {
     const state = tabState[tabId];
     if (!state) { tell(tabId, { action: "error", message: "No previous translation to retry." }); return; }
+    state.manualOrder = msg.manualOrder || null;
     (async () => {
       try { await streamTranslation(state.b64, tabId, true, state.fullB64 || state.b64); }
       catch (err) { tell(tabId, { action: "error", message: friendlyError(err) }); }
@@ -410,7 +412,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         fullB64: null,
         analysisImageUrl: null,
         lastContextImageUrl: null,
-        ignoreSfx: false
+        ignoreSfx: false,
+        manualOrder: null
       };
     }
     tabState[tabId].analysisEnabled = enabled;
@@ -431,7 +434,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         fullB64: null,
         analysisImageUrl: null,
         lastContextImageUrl: null,
-        ignoreSfx: false
+        ignoreSfx: false,
+        manualOrder: null
       };
     }
     tabState[tabId].styleId = styleId;
@@ -451,7 +455,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         fullB64: null,
         analysisImageUrl: null,
         lastContextImageUrl: null,
-        ignoreSfx
+        ignoreSfx,
+        manualOrder: null
       };
     } else {
       tabState[tabId].ignoreSfx = ignoreSfx;
@@ -477,7 +482,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         fullB64: null,
         analysisImageUrl: null,
         lastContextImageUrl: null,
-        ignoreSfx: false
+        ignoreSfx: false,
+        manualOrder: null
       };
     }
     tabState[tabId].readingOrder = {
@@ -795,6 +801,19 @@ function buildStyleBlock(tabId) {
   return style ? "STYLE PROFILE:\n" + style.prompt : "";
 }
 
+function buildManualOrderDirective(manualOrder) {
+  if (!manualOrder?.groups?.length) return "";
+  const lines = [
+    "⚠️ USER-DEFINED ORDER OVERRIDE:",
+    "Translate entries in this exact order. If a line lists multiple originals, merge them into ONE output entry."
+  ];
+  manualOrder.groups.forEach((group, index) => {
+    const label = group.length > 1 ? "MERGE" : "ENTRY";
+    lines.push(`${index + 1}) ${label}: ${group.join(" + ")}`);
+  });
+  return lines.join("\n") + "\n\n";
+}
+
 // =================== STREAMING TRANSLATION (analysis → translate) ===================
 async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
 
@@ -831,8 +850,11 @@ async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
   const readingOrder = getReadingOrder(tabId);
   const autoOrder = readingOrder?.auto !== false;
   const detectedOrder = autoOrder ? detectReadingOrder(analysis) : null;
+  const manualOrderDirective = buildManualOrderDirective(state?.manualOrder);
   let orderDirective = "";
-  if (!autoOrder) {
+  if (manualOrderDirective) {
+    orderDirective = manualOrderDirective;
+  } else if (!autoOrder) {
     const dir = readingOrder?.rtl ? "RIGHT to LEFT" : "LEFT to RIGHT";
     const vertical = readingOrder?.ttb === false ? "bottom to top" : "top to bottom";
     orderDirective =

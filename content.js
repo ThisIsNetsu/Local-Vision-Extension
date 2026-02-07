@@ -198,8 +198,20 @@
       border-left:3px solid transparent;
       cursor:pointer;transition:all .15s;position:relative;
     }
+    .vtl-block[draggable="true"] { cursor:grab; }
+    .vtl-block.vtl-dragging { opacity:.6; cursor:grabbing; }
+    .vtl-block.vtl-drop-before { border-top:2px solid #e94560; }
+    .vtl-block.vtl-drop-after { border-bottom:2px solid #e94560; }
+    .vtl-block.vtl-drop-merge { box-shadow:0 0 0 2px rgba(88,166,255,.5) inset; }
     .vtl-block:hover { border-left-color:#e94560;background:#1c2129; }
     .vtl-block.vtl-warn { border-left-color:#e9a045; }
+    .vtl-merge-tag {
+      position:absolute;top:8px;right:34px;font-size:10px;
+      color:#58a6ff;background:rgba(88,166,255,.12);
+      border:1px solid rgba(88,166,255,.35);border-radius:999px;
+      padding:2px 6px;font-weight:600;text-transform:uppercase;
+      letter-spacing:.3px;
+    }
     .vtl-warn-tag {
       position:absolute;top:8px;right:10px;font-size:12px;color:#e9a045;
     }
@@ -383,6 +395,9 @@
   function clamp(val, min, max) {
     return Math.min(max, Math.max(min, val));
   }
+  function joinLines(lines) {
+    return lines.filter(Boolean).join(" ");
+  }
 
   /* ═══════════════════════════════════════════════════════
      Parser  (translation blocks only; skips stray [ANALYSIS])
@@ -423,6 +438,100 @@
     return blocks;
   }
 
+  function buildRenderGroups(blocks) {
+    const entries = blocks.map((block, index) => ({
+      ...block,
+      index,
+      key: `${block.cat}|${block.orig}|${index}`
+    }));
+    const remaining = entries.slice();
+    const used = new Set();
+    const groups = [];
+
+    let matchedCount = 0;
+    if (customOrder?.groups?.length) {
+      for (const group of customOrder.groups) {
+        const matched = [];
+        for (const wantedOrig of group) {
+          const match = remaining.find(entry => !used.has(entry.key) && entry.orig === wantedOrig);
+          if (match) {
+            used.add(match.key);
+            matched.push(match);
+            matchedCount += 1;
+          }
+        }
+        if (matched.length) groups.push(matched);
+      }
+    }
+
+    for (const entry of remaining) {
+      if (!used.has(entry.key)) groups.push([entry]);
+    }
+
+    currentRenderGroups = groups.map(groupBlocks => ({
+      keys: groupBlocks.map(b => b.key),
+      blocks: groupBlocks
+    }));
+
+    if (customOrder && (!customOrder.groups?.length || matchedCount === 0)) customOrder = null;
+
+    return currentRenderGroups;
+  }
+
+  function buildManualOrderPayload() {
+    if (!customOrder?.groups?.length) return null;
+    return {
+      groups: currentRenderGroups.map(group => group.blocks.map(block => block.orig).filter(Boolean))
+    };
+  }
+
+  function buildCustomOrderFromGroups(groups) {
+    return {
+      groups: groups.map(group => group.blocks.map(block => block.orig).filter(Boolean))
+    };
+  }
+
+  function getDropMode(event, target) {
+    const rect = target.getBoundingClientRect();
+    const offset = (event.clientY - rect.top) / rect.height;
+    if (offset < 0.25) return "before";
+    if (offset > 0.75) return "after";
+    return "merge";
+  }
+
+  function clearDropClasses(el) {
+    if (!el) return;
+    el.classList.remove("vtl-drop-before", "vtl-drop-after", "vtl-drop-merge");
+    delete el.dataset.dropMode;
+  }
+
+  function applyDragUpdate(fromIndex, toIndex, mode) {
+    if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return;
+    const groups = currentRenderGroups.map(group => ({
+      keys: group.keys.slice(),
+      blocks: group.blocks.slice()
+    }));
+    const [moving] = groups.splice(fromIndex, 1);
+    if (!moving) return;
+
+    if (mode === "merge") {
+      const target = groups[toIndex];
+      if (!target) return;
+      target.blocks = target.blocks.concat(moving.blocks);
+      target.keys = target.keys.concat(moving.keys);
+    } else {
+      let insertIndex = toIndex;
+      if (mode === "after") insertIndex = toIndex + 1;
+      if (fromIndex < insertIndex) insertIndex -= 1;
+      groups.splice(insertIndex, 0, moving);
+    }
+
+    currentRenderGroups = groups;
+    customOrder = buildCustomOrderFromGroups(groups);
+    render(lastText, isStreaming);
+    toast("Order updated. Retry to apply.");
+  }
+
   /* ═══════════════════════════════════════════════════════
      Overlay / Panel
      ═══════════════════════════════════════════════════════ */
@@ -445,6 +554,9 @@
   let warnMap = {};
   const noteMap = new Map();
   const noteTimers = new Map();
+  let customOrder = null;
+  let currentRenderGroups = [];
+  let dragState = null;
   let docKeyHandler = null;
   let prevOverflow = "";
   let prevBodyOverflow = "";
@@ -528,6 +640,9 @@
     currentImageUrl = imageUrl;
     lastText = "";
     warnMap = {};
+    customOrder = null;
+    currentRenderGroups = [];
+    dragState = null;
     analysisEnabled = analysisFlag !== false;
     ignoreSfx = ignoreSfxFlag === true;
     prevOverflow = document.documentElement.style.overflow;
@@ -601,7 +716,7 @@
     retryBtn.onclick = () => {
       currentAnalysis = "";
       panelBody.innerHTML = '<div class="vtl-status vtl-pulse">Re-scanning image</div>';
-      browser.runtime.sendMessage({ action: "retry" });
+      browser.runtime.sendMessage({ action: "retry", manualOrder: buildManualOrderPayload() });
     };
 
     const closeBtn = Object.assign(document.createElement("button"),
@@ -619,7 +734,7 @@
     const info = document.createElement("div");
     info.className = "vtl-info";
     info.innerHTML =
-      '<kbd>Retry</kbd> re-scans for missed text · <kbd>Click</kbd> a line to retranslate · Drag on the image to select a region · Per-line notes auto-retranslate';
+      '<kbd>Retry</kbd> re-scans for missed text · <kbd>Click</kbd> a line to retranslate · Drag on the image to select a region · Drag lines to reorder, drop center to merge · Per-line notes auto-retranslate';
 
     panelBody = document.createElement("div");
     panelBody.className = "vtl-body";
@@ -703,7 +818,7 @@
       render(lastText, isStreaming);
     });
     gRetry.onclick = () => {
-      browser.runtime.sendMessage({ action: "retry" });
+      browser.runtime.sendMessage({ action: "retry", manualOrder: buildManualOrderPayload() });
     };
     gClear.onclick = async () => {
       try {
@@ -1017,6 +1132,7 @@
   function render(text, live) {
     if (!panelBody) return;
     const blocks = parseBlocks(text).filter(block => !ignoreSfx || block.cat !== "SFX");
+    const groups = buildRenderGroups(blocks);
 
     let html = buildAnalysisHTML();
 
@@ -1032,15 +1148,22 @@
       return;
     }
 
-    for (let i = 0; i < blocks.length; i++) {
-      const b = blocks[i];
-      const key = i + "|" + b.orig;
-      const warn = warnMap[i];
-      html += '<div class="vtl-block' + (warn ? " vtl-warn" : "") + '" data-i="' + i + '">' +
+    for (let i = 0; i < groups.length; i++) {
+      const group = groups[i];
+      const groupBlocks = group.blocks;
+      if (!groupBlocks.length) continue;
+      const merged = groupBlocks.length > 1;
+      const combinedOrig = joinLines(groupBlocks.map(b => b.orig));
+      const combinedTrans = joinLines(groupBlocks.map(b => b.trans));
+      const cat = groupBlocks[0].cat || "TEXT";
+      const key = groupBlocks.map(b => b.key).join("||");
+      const warn = groupBlocks.some(b => warnMap[b.index]);
+      html += '<div class="vtl-block' + (warn ? " vtl-warn" : "") + '" data-i="' + i + '" data-group="' + i + '" draggable="true">' +
         (warn ? '<span class="vtl-warn-tag" title="' + escAttr(warn) + '">⚠</span>' : "") +
-        '<span class="vtl-badge vtl-badge-' + b.cat.toLowerCase() + '">' + b.cat + "</span>" +
-        '<div class="vtl-orig">' + esc(b.orig) + "</div>" +
-        '<div class="vtl-trans" data-orig="' + escAttr(b.orig) + '">' + esc(b.trans) + "</div>" +
+        (merged ? '<span class="vtl-merge-tag">Merged</span>' : "") +
+        '<span class="vtl-badge vtl-badge-' + cat.toLowerCase() + '">' + cat + "</span>" +
+        '<div class="vtl-orig">' + esc(combinedOrig) + "</div>" +
+        '<div class="vtl-trans" data-orig="' + escAttr(combinedOrig) + '">' + esc(combinedTrans) + "</div>" +
         '<textarea class="vtl-note" rows="1" data-key="' + escAttr(key) + '" placeholder="Note for this line (auto-retranslate)…"></textarea>' +
         "</div>";
     }
@@ -1050,6 +1173,41 @@
     attachAnalysisToggle();
     panelBody.querySelectorAll(".vtl-block").forEach(el => {
       el.addEventListener("click", onCtx);
+      el.addEventListener("dragstart", e => {
+        const groupIndex = Number(el.dataset.group);
+        if (Number.isNaN(groupIndex)) return;
+        dragState = { groupIndex };
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", "");
+        el.classList.add("vtl-dragging");
+      });
+      el.addEventListener("dragend", () => {
+        dragState = null;
+        el.classList.remove("vtl-dragging");
+        panelBody.querySelectorAll(".vtl-block").forEach(clearDropClasses);
+      });
+      el.addEventListener("dragover", e => {
+        if (!dragState) return;
+        e.preventDefault();
+        const mode = getDropMode(e, el);
+        clearDropClasses(el);
+        el.dataset.dropMode = mode;
+        el.classList.add("vtl-drop-" + mode);
+      });
+      el.addEventListener("dragleave", () => {
+        clearDropClasses(el);
+      });
+      el.addEventListener("drop", e => {
+        if (!dragState) return;
+        e.preventDefault();
+        const mode = el.dataset.dropMode || "merge";
+        const targetIndex = Number(el.dataset.group);
+        if (!Number.isNaN(targetIndex)) {
+          applyDragUpdate(dragState.groupIndex, targetIndex, mode);
+        }
+        dragState = null;
+        panelBody.querySelectorAll(".vtl-block").forEach(clearDropClasses);
+      });
     });
 
     // attach note inputs
