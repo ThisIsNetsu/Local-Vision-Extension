@@ -52,6 +52,10 @@ function getStyleId(tid) {
   return tabState[tid]?.styleId || DEFAULT_STYLE;
 }
 
+function getReadingOrder(tid) {
+  return tabState[tid]?.readingOrder || { auto: true, rtl: false, ttb: true };
+}
+
 // =================== Page history for translation continuity ===================
 const pageHistory = {};
 const MAX_HISTORY  = 3;
@@ -396,13 +400,30 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     return Promise.resolve({ ok: true });
   }
 
+  if (msg.action === "setReadingOrder") {
+    const order = msg.readingOrder || {};
+    if (!tabState[tabId]) {
+      tabState[tabId] = { b64: null, imageUrl: null, analysis: "", analysisEnabled: true, styleId: DEFAULT_STYLE, lastTranslation: "" };
+    }
+    tabState[tabId].readingOrder = {
+      auto: order.auto !== false,
+      rtl: !!order.rtl,
+      ttb: order.ttb !== false
+    };
+    return Promise.resolve({ readingOrder: tabState[tabId].readingOrder });
+  }
+
   if (msg.action === "clearGlobalInstructions") {
     globalInstructions = "";
     return Promise.resolve({ ok: true });
   }
 
   if (msg.action === "getGlobals") {
-    return Promise.resolve({ globalInstructions, styleId: getStyleId(tabId) });
+    return Promise.resolve({
+      globalInstructions,
+      styleId: getStyleId(tabId),
+      readingOrder: getReadingOrder(tabId)
+    });
   }
 
   if (msg.action === "chat") {
@@ -724,13 +745,26 @@ async function streamTranslation(base64Url, tabId, isRetry) {
   if (tabState[tabId]) tabState[tabId].analysis = analysis;
 
   // —— Stage 2: Translation (streaming) ——
-  const readingOrder = detectReadingOrder(analysis);
+  const readingOrder = getReadingOrder(tabId);
+  const autoOrder = readingOrder?.auto !== false;
+  const detectedOrder = autoOrder ? detectReadingOrder(analysis) : null;
   let orderDirective = "";
-  if (readingOrder) {
+  if (!autoOrder) {
+    const dir = readingOrder?.rtl ? "RIGHT to LEFT" : "LEFT to RIGHT";
+    const vertical = readingOrder?.ttb === false ? "bottom to top" : "top to bottom";
     orderDirective =
-      "⚠️ READING ORDER: " + readingOrder +
+      "⚠️ READING ORDER: " + dir + ", " + vertical +
+      ". You MUST translate text entries in this order across the page.";
+    if (dir.includes("LEFT to RIGHT")) {
+      orderDirective += " Do NOT use right-to-left manga order.\n\n";
+    } else {
+      orderDirective += " Do NOT use left-to-right manhwa order.\n\n";
+    }
+  } else if (detectedOrder) {
+    orderDirective =
+      "⚠️ READING ORDER: " + detectedOrder +
       ". You MUST translate text entries in this order across the page, top to bottom." +
-      (readingOrder.includes("LEFT to RIGHT")
+      (detectedOrder.includes("LEFT to RIGHT")
         ? " Do NOT use right-to-left manga order.\n\n"
         : " Do NOT use left-to-right manhwa order.\n\n");
   }
