@@ -546,6 +546,7 @@
      ═══════════════════════════════════════════════════════ */
   let overlay = null, panelBody = null, ctxMenu = null, ctxBadge = null;
   let isStreaming = false, analysisOpen = false, currentImageUrl = null;
+  let lastOverlayImageUrl = null;
   let currentAnalysis = "", ctxModal = null;
   let currentHistoryCount = 0;
   let analysisEnabled = true;
@@ -653,7 +654,18 @@
     analysisOpen = false;
     currentAnalysis = "";
     currentImageUrl = imageUrl;
-    lastIncomingText = "";
+    const isNewImage = imageUrl && imageUrl !== lastOverlayImageUrl;
+    if (isNewImage) {
+      appendHistoryText = "";
+      appendWarnMap = {};
+      appendBaseCount = 0;
+      warnMap = {};
+      lastIncomingText = "";
+      lastText = "";
+    } else {
+      lastIncomingText = "";
+    }
+    lastOverlayImageUrl = imageUrl;
     if (!appendTranslations) {
       lastText = "";
       appendHistoryText = "";
