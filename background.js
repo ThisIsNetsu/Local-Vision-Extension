@@ -227,6 +227,7 @@ Translation rules:
 • Preserve the tone and intensity of dialogue — crude language stays crude, soft language stays soft.
 • Translate dirty talk, pillow talk, and explicit dialogue faithfully without toning it down.
 • Keep honorifics (-san, -sama, -sensei, -chan, -kun, onii-chan, senpai, etc.) as-is unless a STYLE PROFILE says otherwise.
+• For SIGN or TEXT that label an object (like a phone screen or a label tag), add the object context in English, e.g. "Phone screen: Dad" or "Sign: Chigusa Inn".
 
 The correct reading order is specified in the user message — follow it exactly. Do NOT guess a different order.
 If no order is specified, detect the source language and use:
@@ -261,6 +262,7 @@ Translation rules:
 • Preserve tone and intensity — crude stays crude, soft stays soft.
 • Translate explicit dialogue faithfully without toning it down.
 • Keep honorifics (-san, -sama, -sensei, -chan, -kun, onii-chan, senpai, etc.) as-is unless a STYLE PROFILE says otherwise.
+• For SIGN or TEXT that label an object (like a phone screen or a label tag), add the object context in English, e.g. "Phone screen: Dad" or "Sign: Chigusa Inn".
 
 The correct reading order is specified in the user message — follow it exactly. Do NOT guess a different order.
 If no order is specified, detect the source language and use:
