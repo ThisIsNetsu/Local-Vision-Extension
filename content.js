@@ -107,7 +107,7 @@
     .vtl-chat {
       flex:0 0 auto;display:flex;flex-direction:column;
       background:#0d1117;border:1px solid #21262d;border-radius:8px;
-      overflow:auto;resize:vertical;min-height:140px;
+      overflow:auto;resize:vertical;min-height:170px;
     }
     .vtl-chat-hdr {
       padding:8px 12px;font-size:12px;color:#58a6ff;
@@ -132,8 +132,8 @@
     }
     .vtl-chat-input textarea {
       flex:1;background:#0d1117;color:#e6edf3;border:1px solid #30363d;
-      border-radius:6px;padding:6px 8px;font-size:12px;resize:vertical;
-      min-height:40px;max-height:120px;
+      border-radius:6px;padding:6px 8px;font-size:12px;resize:none;
+      height:32px;min-height:32px;max-height:32px;
     }
     .vtl-info {
       padding:8px 18px;font-size:11px;color:#484f58;
@@ -403,7 +403,7 @@
     requestAnimationFrame(() => {
       const rect = chatEl.getBoundingClientRect();
       if (!rect.height) return;
-      const target = Math.max(140, rect.height * 0.5);
+      const target = Math.max(170, rect.height * 0.6);
       chatEl.style.height = target + "px";
     });
   }
@@ -551,9 +551,15 @@
   let analysisEnabled = true;
   let ignoreSfx = false;
   let lastText = "";
+  let lastIncomingText = "";
+  let appendHistoryText = "";
+  let appendTranslations = false;
+  let appendWarnMap = {};
+  let appendBaseCount = 0;
   let globalBox = null, globalStatus = null, globalTextarea = null;
   let orderAuto = null, orderRtl = null, orderTtb = null;
   let ignoreSfxToggle = null;
+  let appendToggle = null;
   let styleSelect = null;
   let overlayImage = null;
   let overlayImageWrap = null;
@@ -648,6 +654,11 @@
     currentAnalysis = "";
     currentImageUrl = imageUrl;
     lastText = "";
+    lastIncomingText = "";
+    appendHistoryText = "";
+    appendTranslations = false;
+    appendWarnMap = {};
+    appendBaseCount = 0;
     warnMap = {};
     customOrder = null;
     currentRenderGroups = [];
@@ -782,7 +793,12 @@
     ignoreSfxToggle.type = "checkbox";
     ignoreSfxToggle.checked = ignoreSfx;
     ignoreSfxLabel.append(ignoreSfxToggle, document.createTextNode("Ignore SFX"));
-    orderRow.append(orderTitle, orderAutoLabel, orderRtlLabel, orderTtbLabel, ignoreSfxLabel);
+    const appendLabel = document.createElement("label");
+    appendToggle = document.createElement("input");
+    appendToggle.type = "checkbox";
+    appendToggle.checked = appendTranslations;
+    appendLabel.append(appendToggle, document.createTextNode("Append translations"));
+    orderRow.append(orderTitle, orderAutoLabel, orderRtlLabel, orderTtbLabel, ignoreSfxLabel, appendLabel);
     const gActions = document.createElement("div");
     gActions.className = "vtl-global-actions";
     const gApply = Object.assign(document.createElement("button"), { className: "vtl-btn", textContent: "Apply", title: "Save global instructions" });
@@ -826,6 +842,24 @@
     ignoreSfxToggle.addEventListener("change", () => {
       ignoreSfx = ignoreSfxToggle.checked;
       browser.runtime.sendMessage({ action: "setIgnoreSfx", ignoreSfx });
+      render(lastText, isStreaming);
+    });
+    appendToggle.addEventListener("change", () => {
+      appendTranslations = appendToggle.checked;
+      appendWarnMap = {};
+      warnMap = {};
+      appendBaseCount = 0;
+      if (appendTranslations) {
+        if (!isStreaming && lastIncomingText) {
+          appendHistoryText = lastIncomingText;
+        } else {
+          appendHistoryText = "";
+        }
+        lastText = appendHistoryText || lastIncomingText;
+      } else {
+        appendHistoryText = "";
+        lastText = lastIncomingText;
+      }
       render(lastText, isStreaming);
     });
     gRetry.onclick = () => {
@@ -1463,18 +1497,44 @@
         if (panelBody) render(lastText, true);
         break;
       case "chunk":
-        lastText = msg.text || "";
+        if (!isStreaming) {
+          appendBaseCount = appendTranslations ? parseBlocks(appendHistoryText).length : 0;
+        }
+        isStreaming = true;
+        lastIncomingText = msg.text || "";
+        if (appendTranslations) {
+          lastText = appendHistoryText ? appendHistoryText + "\n\n" + lastIncomingText : lastIncomingText;
+        } else {
+          lastText = lastIncomingText;
+        }
         render(lastText, true);
         break;
       case "done":
         isStreaming = false;
-        lastText = msg.text || "";
+        lastIncomingText = msg.text || "";
+        if (appendTranslations) {
+          appendHistoryText = appendHistoryText
+            ? appendHistoryText + "\n\n" + lastIncomingText
+            : lastIncomingText;
+          lastText = appendHistoryText;
+        } else {
+          lastText = lastIncomingText;
+        }
         render(lastText, false);
         if (msg.historyCount != null) updateBadge(msg.historyCount);
         break;
       case "quality":
         warnMap = {};
-        (msg.items || []).forEach(it => { warnMap[it.index] = it.reason || "Low confidence"; });
+        if (appendTranslations) {
+          warnMap = { ...appendWarnMap };
+          const offset = appendBaseCount;
+          (msg.items || []).forEach(it => {
+            warnMap[it.index + offset] = it.reason || "Low confidence";
+          });
+          appendWarnMap = warnMap;
+        } else {
+          (msg.items || []).forEach(it => { warnMap[it.index] = it.reason || "Low confidence"; });
+        }
         render(lastText, isStreaming);
         break;
       case "globalInstructionUpdate":
