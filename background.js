@@ -6,7 +6,7 @@ const TARGET_LANG  = "English";
 const MAX_TOKENS   = 2048;
 const TEMPERATURE  = 0.2;
 const RETRY_TEMP   = 0.5;
-const IMG_MAX_DIM  = 768;
+const IMG_MAX_DIM  = 1024;
 
 const REPEAT_PENALTY       = 1.15;
 const REPEAT_LAST_N        = 256;
@@ -712,7 +712,7 @@ function bitmapToJpeg(bmp, sx, sy, sw, sh) {
   const ctx = c.getContext("2d");
   ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, w, h);
   ctx.drawImage(bmp, sx, sy, sw, sh, 0, 0, w, h);
-  return c.toDataURL("image/jpeg", 0.85);
+  return c.toDataURL("image/jpeg", 0.95);
 }
 
 async function imageToBase64Jpeg(url, referer) {

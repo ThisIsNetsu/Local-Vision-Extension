@@ -16,7 +16,7 @@
       overscroll-behavior:contain;
     }
     .vtl-panel {
-      width:80rem;max-width:96vw;height:88vh;
+      width:120rem;max-width:98vw;height:88vh;
       background:#0d1117;color:#e6edf3;
       border-radius:16px;border:1px solid #30363d;
       box-shadow:0 24px 64px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.04);
@@ -73,7 +73,7 @@
       flex:1;display:flex;flex-direction:column;min-width:0;
     }
     .vtl-right {
-      width:50%;background:#010409;
+      width:60%;background:#010409;
       display:flex;flex-direction:column;
       border-left:1px solid #30363d;padding:16px;flex-shrink:0;
       overflow:hidden;gap:12px;
@@ -81,7 +81,21 @@
     .vtl-image-wrap {
       flex:0 0 auto;display:flex;align-items:center;justify-content:center;
       background:#0d1117;border:1px solid #21262d;border-radius:8px;
-      padding:8px;
+      padding:8px;position:relative;
+    }
+    .vtl-image-wrap.vtl-image-selecting {
+      cursor:crosshair;
+      box-shadow:0 0 0 2px rgba(233,69,96,.35) inset;
+    }
+    .vtl-image-hint {
+      position:absolute;inset:8px;
+      display:none;align-items:flex-start;justify-content:center;
+      color:#e94560;font:600 12px system-ui;pointer-events:none;
+      text-shadow:0 2px 6px rgba(0,0,0,.7);
+    }
+    .vtl-image-sel-box {
+      position:absolute;border:2px dashed #e94560;
+      background:rgba(233,69,96,.12);pointer-events:none;
     }
     .vtl-image-wrap img {
       max-width:100%;max-height:46vh;
@@ -364,6 +378,9 @@
     document.body.appendChild(t);
     setTimeout(() => t.remove(), 1600);
   }
+  function clamp(val, min, max) {
+    return Math.min(max, Math.max(min, val));
+  }
 
   /* ═══════════════════════════════════════════════════════
      Parser  (translation blocks only; skips stray [ANALYSIS])
@@ -418,6 +435,11 @@
   let orderAuto = null, orderRtl = null, orderTtb = null;
   let ignoreSfxToggle = null;
   let styleSelect = null;
+  let overlayImage = null;
+  let overlayImageWrap = null;
+  let overlayImageHint = null;
+  let overlaySelectActive = false;
+  let overlaySelectBox = null;
   let warnMap = {};
   const noteMap = new Map();
   const noteTimers = new Map();
@@ -437,6 +459,11 @@
     if (docKeyHandler) return;
     docKeyHandler = (e) => {
       if (!overlay) return;
+      if (overlaySelectActive && e.key === "Escape") {
+        e.preventDefault();
+        cancelOverlaySelection();
+        return;
+      }
       if (overlay.contains(e.target)) {
         e.stopPropagation();
       }
@@ -567,6 +594,16 @@
       } catch {}
     };
 
+    const selectBtn = Object.assign(document.createElement("button"),
+      { className: "vtl-btn", textContent: "🎯 Select Region" });
+    selectBtn.onclick = () => {
+      if (!currentImageUrl) {
+        toast("No image available for selection.");
+        return;
+      }
+      enableOverlaySelection();
+    };
+
     const retryBtn = Object.assign(document.createElement("button"),
       { className: "vtl-btn", textContent: "⟳ Retry" });
     retryBtn.onclick = () => {
@@ -579,7 +616,7 @@
       { className: "vtl-btn", textContent: "✕ Close" });
     closeBtn.onclick = closeOverlay;
 
-    hdr.append(title, styleSelect, clearBtn, analysisBtn, retryBtn, closeBtn);
+    hdr.append(title, styleSelect, clearBtn, analysisBtn, selectBtn, retryBtn, closeBtn);
 
     const content = document.createElement("div");
     content.className = "vtl-content";
@@ -590,7 +627,7 @@
     const info = document.createElement("div");
     info.className = "vtl-info";
     info.innerHTML =
-      '<kbd>Retry</kbd> re-scans for missed text · <kbd>Right-click</kbd> a line to retranslate · Per-line notes auto-retranslate';
+      '<kbd>Retry</kbd> re-scans for missed text · <kbd>Right-click</kbd> a line to retranslate · <kbd>Select Region</kbd> lets you drag a new crop · Per-line notes auto-retranslate';
 
     panelBody = document.createElement("div");
     panelBody.className = "vtl-body";
@@ -696,13 +733,20 @@
 
     const imgWrap = document.createElement("div");
     imgWrap.className = "vtl-image-wrap";
+    overlayImageWrap = imgWrap;
     if (imageUrl) {
       const img = document.createElement("img");
       img.src = imageUrl;
       img.alt = "Source";
       img.draggable = false;
       imgWrap.appendChild(img);
+      overlayImage = img;
     }
+    overlayImageHint = document.createElement("div");
+    overlayImageHint.className = "vtl-image-hint";
+    overlayImageHint.textContent = "Drag to select a region · ESC to cancel";
+    imgWrap.appendChild(overlayImageHint);
+    attachOverlayImageSelection(imgWrap);
 
     const chat = document.createElement("div");
     chat.className = "vtl-chat";
@@ -768,9 +812,100 @@
     isStreaming = false;
     currentAnalysis = "";
     currentImageUrl = null;
+    overlayImage = null;
+    overlayImageWrap = null;
+    overlayImageHint = null;
+    overlaySelectActive = false;
+    overlaySelectBox = null;
     document.documentElement.style.overflow = prevOverflow;
     document.body.style.overflow = prevBodyOverflow;
     unbindOverlayKeys();
+  }
+
+  function enableOverlaySelection() {
+    if (!overlayImage || !overlayImageWrap) return;
+    overlaySelectActive = true;
+    overlayImageWrap.classList.add("vtl-image-selecting");
+    if (overlayImageHint) overlayImageHint.style.display = "flex";
+  }
+
+  function cancelOverlaySelection() {
+    overlaySelectActive = false;
+    if (overlayImageWrap) overlayImageWrap.classList.remove("vtl-image-selecting");
+    if (overlayImageHint) overlayImageHint.style.display = "none";
+    if (overlaySelectBox) {
+      overlaySelectBox.remove();
+      overlaySelectBox = null;
+    }
+  }
+
+  function attachOverlayImageSelection(imgWrap) {
+    imgWrap.addEventListener("mousedown", e => {
+      if (!overlaySelectActive || !overlayImage) return;
+      if (e.button !== 0) return;
+      const imgRect = overlayImage.getBoundingClientRect();
+      if (
+        e.clientX < imgRect.left || e.clientX > imgRect.right ||
+        e.clientY < imgRect.top || e.clientY > imgRect.bottom
+      ) {
+        return;
+      }
+      e.preventDefault();
+
+      const wrapRect = imgWrap.getBoundingClientRect();
+      const sx = clamp(e.clientX, imgRect.left, imgRect.right);
+      const sy = clamp(e.clientY, imgRect.top, imgRect.bottom);
+
+      if (overlaySelectBox) overlaySelectBox.remove();
+      overlaySelectBox = document.createElement("div");
+      overlaySelectBox.className = "vtl-image-sel-box";
+      imgWrap.appendChild(overlaySelectBox);
+
+      function onMove(e2) {
+        const cx = clamp(e2.clientX, imgRect.left, imgRect.right);
+        const cy = clamp(e2.clientY, imgRect.top, imgRect.bottom);
+        const x1 = Math.min(sx, cx);
+        const y1 = Math.min(sy, cy);
+        const x2 = Math.max(sx, cx);
+        const y2 = Math.max(sy, cy);
+        Object.assign(overlaySelectBox.style, {
+          left: (x1 - wrapRect.left) + "px",
+          top: (y1 - wrapRect.top) + "px",
+          width: (x2 - x1) + "px",
+          height: (y2 - y1) + "px"
+        });
+      }
+
+      function onUp(e2) {
+        removeEventListener("mousemove", onMove);
+        removeEventListener("mouseup", onUp);
+
+        const ex = clamp(e2.clientX, imgRect.left, imgRect.right);
+        const ey = clamp(e2.clientY, imgRect.top, imgRect.bottom);
+        const x1 = Math.min(sx, ex);
+        const y1 = Math.min(sy, ey);
+        const w = Math.abs(ex - sx);
+        const h = Math.abs(ey - sy);
+
+        cancelOverlaySelection();
+
+        if (w < 10 || h < 10) return;
+        const crop = {
+          x: Math.max(0, (x1 - imgRect.left) / imgRect.width),
+          y: Math.max(0, (y1 - imgRect.top) / imgRect.height),
+          w: Math.min(1, w / imgRect.width),
+          h: Math.min(1, h / imgRect.height)
+        };
+        browser.runtime.sendMessage({
+          action: "translateRegion",
+          imageUrl: currentImageUrl,
+          crop,
+          pageUrl: location.href
+        });
+      }
+      addEventListener("mousemove", onMove);
+      addEventListener("mouseup", onUp);
+    });
   }
 
   /* ══════════════════════════════════════════════════════
