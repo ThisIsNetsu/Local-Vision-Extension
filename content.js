@@ -16,7 +16,7 @@
       overscroll-behavior:contain;
     }
     .vtl-panel {
-      width:120rem;max-width:98vw;height:88vh;
+      width:120rem;max-width:98vw;height:92vh;
       background:#0d1117;color:#e6edf3;
       border-radius:16px;border:1px solid #30363d;
       box-shadow:0 24px 64px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.04);
@@ -73,7 +73,7 @@
       flex:1;display:flex;flex-direction:column;min-width:0;
     }
     .vtl-right {
-      width:60%;background:#010409;
+      width:52%;background:#010409;
       display:flex;flex-direction:column;
       border-left:1px solid #30363d;padding:16px;flex-shrink:0;
       overflow:hidden;gap:12px;
@@ -88,17 +88,19 @@
       box-shadow:0 0 0 2px rgba(233,69,96,.35) inset;
     }
     .vtl-image-hint {
-      position:absolute;inset:8px;
-      display:none;align-items:flex-start;justify-content:center;
-      color:#e94560;font:600 12px system-ui;pointer-events:none;
+      position:absolute;top:6px;left:50%;transform:translateX(-50%);
+      display:flex;align-items:center;justify-content:center;
+      color:#e94560;font:600 11px system-ui;pointer-events:none;
       text-shadow:0 2px 6px rgba(0,0,0,.7);
+      background:rgba(22,27,34,.75);border:1px solid #30363d;
+      padding:4px 10px;border-radius:999px;
     }
     .vtl-image-sel-box {
       position:absolute;border:2px dashed #e94560;
       background:rgba(233,69,96,.12);pointer-events:none;
     }
     .vtl-image-wrap img {
-      max-width:100%;max-height:46vh;
+      max-width:100%;max-height:54vh;
       object-fit:contain;border-radius:6px;
       box-shadow:0 4px 16px rgba(0,0,0,.4);
     }
@@ -194,7 +196,7 @@
       margin-bottom:10px;padding:10px 12px;
       background:#161b22;border-radius:8px;
       border-left:3px solid transparent;
-      cursor:context-menu;transition:all .15s;position:relative;
+      cursor:pointer;transition:all .15s;position:relative;
     }
     .vtl-block:hover { border-left-color:#e94560;background:#1c2129; }
     .vtl-block.vtl-warn { border-left-color:#e9a045; }
@@ -594,16 +596,6 @@
       } catch {}
     };
 
-    const selectBtn = Object.assign(document.createElement("button"),
-      { className: "vtl-btn", textContent: "🎯 Select Region" });
-    selectBtn.onclick = () => {
-      if (!currentImageUrl) {
-        toast("No image available for selection.");
-        return;
-      }
-      enableOverlaySelection();
-    };
-
     const retryBtn = Object.assign(document.createElement("button"),
       { className: "vtl-btn", textContent: "⟳ Retry" });
     retryBtn.onclick = () => {
@@ -616,7 +608,7 @@
       { className: "vtl-btn", textContent: "✕ Close" });
     closeBtn.onclick = closeOverlay;
 
-    hdr.append(title, styleSelect, clearBtn, analysisBtn, selectBtn, retryBtn, closeBtn);
+    hdr.append(title, styleSelect, clearBtn, analysisBtn, retryBtn, closeBtn);
 
     const content = document.createElement("div");
     content.className = "vtl-content";
@@ -627,7 +619,7 @@
     const info = document.createElement("div");
     info.className = "vtl-info";
     info.innerHTML =
-      '<kbd>Retry</kbd> re-scans for missed text · <kbd>Right-click</kbd> a line to retranslate · <kbd>Select Region</kbd> lets you drag a new crop · Per-line notes auto-retranslate';
+      '<kbd>Retry</kbd> re-scans for missed text · <kbd>Click</kbd> a line to retranslate · Drag on the image to select a region · Per-line notes auto-retranslate';
 
     panelBody = document.createElement("div");
     panelBody.className = "vtl-body";
@@ -741,10 +733,13 @@
       img.draggable = false;
       imgWrap.appendChild(img);
       overlayImage = img;
+      overlaySelectActive = true;
+      imgWrap.classList.add("vtl-image-selecting");
     }
     overlayImageHint = document.createElement("div");
     overlayImageHint.className = "vtl-image-hint";
     overlayImageHint.textContent = "Drag to select a region · ESC to cancel";
+    if (!imageUrl) overlayImageHint.style.display = "none";
     imgWrap.appendChild(overlayImageHint);
     attachOverlayImageSelection(imgWrap);
 
@@ -822,17 +817,7 @@
     unbindOverlayKeys();
   }
 
-  function enableOverlaySelection() {
-    if (!overlayImage || !overlayImageWrap) return;
-    overlaySelectActive = true;
-    overlayImageWrap.classList.add("vtl-image-selecting");
-    if (overlayImageHint) overlayImageHint.style.display = "flex";
-  }
-
   function cancelOverlaySelection() {
-    overlaySelectActive = false;
-    if (overlayImageWrap) overlayImageWrap.classList.remove("vtl-image-selecting");
-    if (overlayImageHint) overlayImageHint.style.display = "none";
     if (overlaySelectBox) {
       overlaySelectBox.remove();
       overlaySelectBox = null;
@@ -1064,7 +1049,7 @@
     panelBody.innerHTML = html;
     attachAnalysisToggle();
     panelBody.querySelectorAll(".vtl-block").forEach(el => {
-      el.addEventListener("contextmenu", onCtx);
+      el.addEventListener("click", onCtx);
     });
 
     // attach note inputs
@@ -1117,6 +1102,7 @@
   function hideCtx() { if (ctxMenu) { ctxMenu.remove(); ctxMenu = null; } }
 
   function onCtx(e) {
+    if (e.target.closest(".vtl-note")) return;
     e.preventDefault();
     e.stopPropagation();
     hideCtx();
