@@ -653,12 +653,17 @@
     analysisOpen = false;
     currentAnalysis = "";
     currentImageUrl = imageUrl;
-    lastText = "";
     lastIncomingText = "";
-    appendHistoryText = "";
-    appendWarnMap = {};
-    appendBaseCount = 0;
-    warnMap = {};
+    if (!appendTranslations) {
+      lastText = "";
+      appendHistoryText = "";
+      appendWarnMap = {};
+      appendBaseCount = 0;
+      warnMap = {};
+    } else {
+      lastText = appendHistoryText;
+      warnMap = { ...appendWarnMap };
+    }
     customOrder = null;
     currentRenderGroups = [];
     dragState = null;
