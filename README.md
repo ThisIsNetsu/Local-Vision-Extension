@@ -1,6 +1,6 @@
 # VisionTranslate (Local Vision Extension)
 
-VisionTranslate is a Manifest V2 browser extension that translates text inside images (manga/manhwa/manhua pages) using a local **llama.cpp** server and a vision-language model (e.g., Qwen3-VL). The extension adds right-click context menu actions to translate a full image or a selected region, then renders a translation overlay with tools for retranslation, notes, and context continuity.
+VisionTranslate is a Manifest V2 browser extension that translates text inside images (manga/manhwa/manhua pages) using a local **llama.cpp** server and a vision-language model (e.g., Qwen3-VL). The extension adds a right-click context menu action to translate a selected region, then renders a translation overlay with tools for retranslation, notes, and context continuity.
 
 # Please note that this is currently in ALPHA and is recieving changes quite often, sometimes breaking functionality as I figure out how to do this.
 
@@ -39,8 +39,7 @@ The extension sends OpenAI-style `/v1/chat/completions` requests with `image_url
 ## Usage
 
 1. **Navigate** to a page with an image (e.g., a manga page).
-2. **Right-click the image** and choose one of:
-   - **🌐 Translate Image Text** (full image)
+2. **Right-click the image** and choose:
    - **🔍 Select & Translate Region** (draw a rectangle)
 3. The overlay will open and start translating.
 

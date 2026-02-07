@@ -324,43 +324,14 @@ Rules for NATURAL translation:
 
 // =================== CONTEXT MENUS ===================
 browser.contextMenus.create({
-  id: "vision-translate", title: "🌐 Translate Image Text", contexts: ["image"],
-});
-browser.contextMenus.create({
   id: "vision-select-translate", title: "🔍 Select & Translate Region", contexts: ["image"],
 });
 
 browser.contextMenus.onClicked.addListener(async (info, tab) => {
   const imageUrl = info.srcUrl;
   const pageUrl  = info.pageUrl || "";
-  const hCount   = getHist(tab.id).length;
-  const analysisEnabled = getAnalysisEnabled(tab.id);
-  const styleId = getStyleId(tab.id);
 
-  if (info.menuItemId === "vision-translate") {
-    const ignoreSfx = getIgnoreSfx(tab.id);
-    try {
-      await tell(tab.id, { action: "showOverlay", imageUrl, historyCount: hCount, analysisEnabled, styleId, ignoreSfx });
-    } catch {
-      await browser.tabs.executeScript(tab.id, { file: "content.js" });
-      await tell(tab.id, { action: "showOverlay", imageUrl, historyCount: hCount, analysisEnabled, styleId, ignoreSfx });
-    }
-    try {
-      const b64 = await imageToBase64Jpeg(imageUrl, pageUrl);
-      const prev = tabState[tab.id];
-      tabState[tab.id] = {
-        b64,
-        imageUrl,
-        analysis: prev?.analysis || "",
-        analysisEnabled,
-        styleId,
-        lastTranslation: prev?.lastTranslation || "",
-        ignoreSfx: prev?.ignoreSfx || false
-      };
-      await streamTranslation(b64, tab.id, false);
-    } catch (err) { tell(tab.id, { action: "error", message: friendlyError(err) }); }
-
-  } else if (info.menuItemId === "vision-select-translate") {
+  if (info.menuItemId === "vision-select-translate") {
     try { await tell(tab.id, { action: "showSelector", imageUrl, pageUrl }); }
     catch { await browser.tabs.executeScript(tab.id, { file: "content.js" }); await tell(tab.id, { action: "showSelector", imageUrl, pageUrl }); }
   }
