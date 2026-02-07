@@ -982,8 +982,6 @@
     hint.textContent = "Draw a rectangle over the area to translate · ESC to cancel";
     selOverlay.appendChild(hint);
 
-    const img = document.querySelector('img[src="' + globalThis.CSS.escape(imageUrl) + '"]');
-    const ir = img?.getBoundingClientRect();
     let sx, sy, box;
 
     selOverlay.addEventListener("mousedown", e => {
@@ -1003,9 +1001,13 @@
         if (selOverlay) { selOverlay.remove(); selOverlay = null; }
         if (box) { box.remove(); box = null; }
 
+        const ir = findImageRect(imageUrl, sx, sy, e2.clientX, e2.clientY);
         const x = Math.min(sx, e2.clientX), y = Math.min(sy, e2.clientY);
         const w = Math.abs(e2.clientX - sx), h = Math.abs(e2.clientY - sy);
-        if (w < 10 || h < 10 || !ir) return;
+        if (w < 10 || h < 10 || !ir) {
+          if (!ir) toast("Could not find the source image on this page.");
+          return;
+        }
 
         const crop = {
           x: Math.max(0, (x - ir.left) / ir.width),
@@ -1027,6 +1029,58 @@
     }
     addEventListener("keydown", onKey);
     document.body.appendChild(selOverlay);
+  }
+
+  function findImageRect(imageUrl, sx, sy, ex, ey) {
+    let targetUrl = imageUrl;
+    try { targetUrl = new URL(imageUrl, location.href).href; } catch {}
+    const imgs = Array.from(document.images || []);
+    const directMatch = imgs.find(img => {
+      const src = img.currentSrc || img.src || "";
+      return src === targetUrl;
+    });
+    if (directMatch) return directMatch.getBoundingClientRect();
+
+    const looseMatch = imgs.find(img => {
+      const src = img.currentSrc || img.src || "";
+      return src.includes(imageUrl);
+    });
+    if (looseMatch) return looseMatch.getBoundingClientRect();
+
+    function elementRectForUrl(el) {
+      if (!el) return null;
+      if (el.tagName === "IMG") return el.getBoundingClientRect();
+      const bg = getComputedStyle(el).backgroundImage || "";
+      if (!bg || bg === "none") return null;
+      const match = bg.match(/url\(["']?(.*?)["']?\)/i);
+      if (!match) return null;
+      const bgUrl = match[1];
+      if (!bgUrl) return null;
+      if (bgUrl === imageUrl || bgUrl === targetUrl || bgUrl.includes(imageUrl)) {
+        return el.getBoundingClientRect();
+      }
+      return null;
+    }
+
+    const pointEl = document.elementFromPoint(sx, sy);
+    const pointImg = pointEl?.closest && pointEl.closest("img");
+    if (pointImg) return pointImg.getBoundingClientRect();
+    const pointRect = elementRectForUrl(pointEl);
+    if (pointRect) return pointRect;
+
+    const centerEl = document.elementFromPoint(
+      (sx + ex) / 2,
+      (sy + ey) / 2
+    );
+    const centerImg = centerEl?.closest && centerEl.closest("img");
+    if (centerImg) return centerImg.getBoundingClientRect();
+    const centerRect = elementRectForUrl(centerEl);
+    if (centerRect) return centerRect;
+
+    const endEl = document.elementFromPoint(ex, ey);
+    const endImg = endEl?.closest && endEl.closest("img");
+    if (endImg) return endImg.getBoundingClientRect();
+    return elementRectForUrl(endEl);
   }
 
   /* ═══════════════════════════════════════════════════════
