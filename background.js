@@ -363,18 +363,25 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         await tell(tabId, { action: "showOverlay", imageUrl: msg.imageUrl, historyCount: hCount, analysisEnabled, styleId, ignoreSfx });
       }
       try {
-        const b64 = await cropAndEncode(msg.imageUrl, msg.crop, msg.pageUrl);
         const prev = tabState[tabId];
+        const isSameImage = prev?.imageUrl === msg.imageUrl;
+        const fullB64 = isSameImage && prev?.fullB64
+          ? prev.fullB64
+          : await imageToBase64Jpeg(msg.imageUrl, msg.pageUrl);
+        const b64 = await cropAndEncode(msg.imageUrl, msg.crop, msg.pageUrl);
         tabState[tabId] = {
           b64,
+          fullB64,
           imageUrl: msg.imageUrl,
-          analysis: prev?.analysis || "",
+          analysis: isSameImage ? (prev?.analysis || "") : "",
+          analysisImageUrl: isSameImage ? prev?.analysisImageUrl || null : null,
           analysisEnabled,
           styleId,
           lastTranslation: prev?.lastTranslation || "",
+          lastContextImageUrl: prev?.lastContextImageUrl || null,
           ignoreSfx: prev?.ignoreSfx || false
         };
-        await streamTranslation(b64, tabId, false);
+        await streamTranslation(b64, tabId, false, fullB64);
       } catch (err) { tell(tabId, { action: "error", message: friendlyError(err) }); }
     })();
     return;
@@ -384,7 +391,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     const state = tabState[tabId];
     if (!state) { tell(tabId, { action: "error", message: "No previous translation to retry." }); return; }
     (async () => {
-      try { await streamTranslation(state.b64, tabId, true); }
+      try { await streamTranslation(state.b64, tabId, true, state.fullB64 || state.b64); }
       catch (err) { tell(tabId, { action: "error", message: friendlyError(err) }); }
     })();
     return;
@@ -400,6 +407,9 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         analysisEnabled: enabled,
         styleId: DEFAULT_STYLE,
         lastTranslation: "",
+        fullB64: null,
+        analysisImageUrl: null,
+        lastContextImageUrl: null,
         ignoreSfx: false
       };
     }
@@ -418,6 +428,9 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         analysisEnabled: true,
         styleId,
         lastTranslation: "",
+        fullB64: null,
+        analysisImageUrl: null,
+        lastContextImageUrl: null,
         ignoreSfx: false
       };
     }
@@ -435,6 +448,9 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         analysisEnabled: true,
         styleId: DEFAULT_STYLE,
         lastTranslation: "",
+        fullB64: null,
+        analysisImageUrl: null,
+        lastContextImageUrl: null,
         ignoreSfx
       };
     } else {
@@ -458,6 +474,9 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         analysisEnabled: true,
         styleId: DEFAULT_STYLE,
         lastTranslation: "",
+        fullB64: null,
+        analysisImageUrl: null,
+        lastContextImageUrl: null,
         ignoreSfx: false
       };
     }
@@ -777,19 +796,23 @@ function buildStyleBlock(tabId) {
 }
 
 // =================== STREAMING TRANSLATION (analysis → translate) ===================
-async function streamTranslation(base64Url, tabId, isRetry) {
+async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
 
   // —— Stage 1: Scene analysis ——
   let analysis = "";
   const analysisEnabled = getAnalysisEnabled(tabId);
+  const state = tabState[tabId];
+  const currentImageUrl = state?.imageUrl || null;
+  const analysisImageUrl = state?.analysisImageUrl || null;
+  const analysisSource = analysisBase64Url || base64Url;
 
   if (analysisEnabled) {
-    if (isRetry && tabState[tabId]?.analysis) {
-      analysis = tabState[tabId].analysis;
+    if ((isRetry && state?.analysis) || (analysisImageUrl && analysisImageUrl === currentImageUrl && state?.analysis)) {
+      analysis = state.analysis;
       tell(tabId, { action: "analysis", text: analysis });
     } else {
       try {
-        analysis = await analyseScene(base64Url, tabId);
+        analysis = await analyseScene(analysisSource, tabId);
         tell(tabId, { action: "analysis", text: analysis });
       } catch {
         tell(tabId, { action: "analysis", text: "" });
@@ -799,7 +822,10 @@ async function streamTranslation(base64Url, tabId, isRetry) {
     tell(tabId, { action: "analysis", text: "" });
   }
 
-  if (tabState[tabId]) tabState[tabId].analysis = analysis;
+  if (tabState[tabId]) {
+    tabState[tabId].analysis = analysis;
+    if (analysis) tabState[tabId].analysisImageUrl = currentImageUrl;
+  }
 
   // —— Stage 2: Translation (streaming) ——
   const readingOrder = getReadingOrder(tabId);
@@ -905,11 +931,29 @@ async function streamTranslation(base64Url, tabId, isRetry) {
 
   // —— Save to page history (analysis + translation) ——
   const histEntry = filterForContext(final, analysis);
-  if (isRetry) replaceLastHist(tabId, histEntry);
-  else         pushHist(tabId, histEntry);
+  const isNewContextImage = state?.lastContextImageUrl !== currentImageUrl;
+  let didUpdateContext = false;
+  if (isRetry) {
+    if (state?.lastContextImageUrl === currentImageUrl) {
+      replaceLastHist(tabId, histEntry);
+      didUpdateContext = true;
+    } else {
+      pushHist(tabId, histEntry);
+      didUpdateContext = true;
+    }
+  } else if (isNewContextImage) {
+    pushHist(tabId, histEntry);
+    didUpdateContext = true;
+  }
+
+  if (didUpdateContext && tabState[tabId]) {
+    tabState[tabId].lastContextImageUrl = currentImageUrl;
+  }
 
   // —— Update story registry in background ——
-  updateStoryRegistry(tabId, analysis, histEntry);
+  if (didUpdateContext) {
+    updateStoryRegistry(tabId, analysis, histEntry);
+  }
 
   // —— Quality check (async) ——
   qualityCheck(final, tabId).catch(() => {});
