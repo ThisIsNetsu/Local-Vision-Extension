@@ -13,6 +13,7 @@
       backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
       font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
       font-size:14px;line-height:1.5;
+      overscroll-behavior:contain;
     }
     .vtl-panel {
       width:80rem;max-width:96vw;height:88vh;
@@ -200,8 +201,17 @@
       margin-top:6px;width:100%;
       background:#0d1117;color:#e6edf3;border:1px solid #30363d;
       border-radius:6px;padding:6px 8px;font-size:11.5px;
-      height:28px;min-height:28px;max-height:28px;resize:none;
-      overflow:hidden;line-height:1.2;
+      resize:none;overflow:hidden;line-height:1.2;
+      height:0;min-height:0;max-height:0;margin-top:0;
+      padding-top:0;padding-bottom:0;border-color:transparent;
+      opacity:0;pointer-events:none;
+      transition:opacity .12s, max-height .12s, margin-top .12s, padding .12s, border-color .12s;
+    }
+    .vtl-block:hover .vtl-note,
+    .vtl-note:focus {
+      opacity:1;max-height:28px;height:28px;min-height:28px;margin-top:6px;
+      padding-top:6px;padding-bottom:6px;border-color:#30363d;
+      pointer-events:auto;
     }
     .vtl-note::placeholder { color:#484f58; }
     .vtl-status {
@@ -401,6 +411,8 @@
   const noteMap = new Map();
   const noteTimers = new Map();
   let docKeyHandler = null;
+  let prevOverflow = "";
+  let prevBodyOverflow = "";
 
   const STYLE_OPTIONS = [
     { id: "explicit", label: "Explicit / Faithful" },
@@ -467,6 +479,10 @@
     lastText = "";
     warnMap = {};
     analysisEnabled = analysisFlag !== false;
+    prevOverflow = document.documentElement.style.overflow;
+    prevBodyOverflow = document.body.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
 
     overlay = document.createElement("div");
     overlay.className = "vtl-overlay";
@@ -677,10 +693,12 @@
     isStreaming = false;
     currentAnalysis = "";
     currentImageUrl = null;
+    document.documentElement.style.overflow = prevOverflow;
+    document.body.style.overflow = prevBodyOverflow;
     unbindOverlayKeys();
   }
 
-  /* ═══════════════════════════════════════════════════════
+  /* ══════════════════════════════════════════════════════
      Context viewer modal
      ═══════════════════════════════════════════════════════ */
   function closeCtxViewer() {
