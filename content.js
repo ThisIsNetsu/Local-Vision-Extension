@@ -557,6 +557,7 @@
   let appendTranslations = true;
   let appendWarnMap = {};
   let appendBaseCount = 0;
+  let appendSegments = [];
   let globalBox = null, globalStatus = null, globalTextarea = null;
   let orderAuto = null, orderRtl = null, orderTtb = null;
   let ignoreSfxToggle = null;
@@ -659,6 +660,7 @@
       appendHistoryText = "";
       appendWarnMap = {};
       appendBaseCount = 0;
+      appendSegments = [];
       warnMap = {};
       lastIncomingText = "";
       lastText = "";
@@ -671,6 +673,7 @@
       appendHistoryText = "";
       appendWarnMap = {};
       appendBaseCount = 0;
+      appendSegments = [];
       warnMap = {};
     } else {
       lastText = appendHistoryText;
@@ -867,13 +870,15 @@
       appendBaseCount = 0;
       if (appendTranslations) {
         if (!isStreaming && lastIncomingText) {
-          appendHistoryText = lastIncomingText;
+          appendSegments = [lastIncomingText];
         } else {
-          appendHistoryText = "";
+          appendSegments = [];
         }
+        appendHistoryText = appendSegments.join("\n\n");
         lastText = appendHistoryText || lastIncomingText;
       } else {
         appendHistoryText = "";
+        appendSegments = [];
         lastText = lastIncomingText;
       }
       render(lastText, isStreaming);
@@ -1514,12 +1519,24 @@
         break;
       case "chunk":
         if (!isStreaming) {
-          appendBaseCount = appendTranslations ? parseBlocks(appendHistoryText).length : 0;
+          if (appendTranslations) {
+            const baseSegments = msg.isRetry && appendSegments.length
+              ? appendSegments.slice(0, -1)
+              : appendSegments.slice();
+            const baseText = baseSegments.join("\n\n");
+            appendBaseCount = parseBlocks(baseText).length;
+          } else {
+            appendBaseCount = 0;
+          }
         }
         isStreaming = true;
         lastIncomingText = msg.text || "";
         if (appendTranslations) {
-          lastText = appendHistoryText ? appendHistoryText + "\n\n" + lastIncomingText : lastIncomingText;
+          const baseSegments = msg.isRetry && appendSegments.length
+            ? appendSegments.slice(0, -1)
+            : appendSegments.slice();
+          const baseText = baseSegments.join("\n\n");
+          lastText = baseText ? baseText + "\n\n" + lastIncomingText : lastIncomingText;
         } else {
           lastText = lastIncomingText;
         }
@@ -1529,9 +1546,12 @@
         isStreaming = false;
         lastIncomingText = msg.text || "";
         if (appendTranslations) {
-          appendHistoryText = appendHistoryText
-            ? appendHistoryText + "\n\n" + lastIncomingText
-            : lastIncomingText;
+          if (msg.isRetry && appendSegments.length) {
+            appendSegments[appendSegments.length - 1] = lastIncomingText;
+          } else {
+            appendSegments.push(lastIncomingText);
+          }
+          appendHistoryText = appendSegments.join("\n\n");
           lastText = appendHistoryText;
         } else {
           lastText = lastIncomingText;
@@ -1542,8 +1562,11 @@
       case "quality":
         warnMap = {};
         if (appendTranslations) {
-          warnMap = { ...appendWarnMap };
           const offset = appendBaseCount;
+          Object.keys(appendWarnMap).forEach(key => {
+            const idx = Number(key);
+            if (idx < offset) warnMap[idx] = appendWarnMap[key];
+          });
           (msg.items || []).forEach(it => {
             warnMap[it.index + offset] = it.reason || "Low confidence";
           });

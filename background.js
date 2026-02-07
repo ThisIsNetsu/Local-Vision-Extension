@@ -934,7 +934,7 @@ async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
           full += c;
           const clean = stripThink(full);
           if (clean && detectLoop(clean)) { aborted = true; reader.cancel(); break; }
-          if (clean) tell(tabId, { action: "chunk", text: clean });
+          if (clean) tell(tabId, { action: "chunk", text: clean, isRetry });
         }
       } catch {}
     }
@@ -978,9 +978,9 @@ async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
   }
 
   // —— Quality check (async) ——
-  qualityCheck(final, tabId).catch(() => {});
+  qualityCheck(final, tabId, isRetry).catch(() => {});
 
-  tell(tabId, { action: "done", text: final, historyCount: getHist(tabId).length });
+  tell(tabId, { action: "done", text: final, historyCount: getHist(tabId).length, isRetry });
 }
 
 // =================== QUALITY CHECK ===================
@@ -1020,7 +1020,7 @@ function parseBlocksForQA(text) {
   return blocks;
 }
 
-async function qualityCheck(text, tabId) {
+async function qualityCheck(text, tabId, isRetry) {
   const blocks = parseBlocksForQA(text);
   if (!blocks.length) return;
 
@@ -1057,7 +1057,7 @@ Return ONLY JSON.`;
   try { items = JSON.parse(out); } catch { return; }
   if (!Array.isArray(items)) return;
 
-  tell(tabId, { action: "quality", items });
+  tell(tabId, { action: "quality", items, isRetry });
 }
 
 // =================== CHAT (text-only) ===================
