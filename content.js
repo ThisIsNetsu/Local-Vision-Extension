@@ -202,7 +202,10 @@
     .vtl-block.vtl-dragging { opacity:.6; cursor:grabbing; }
     .vtl-block.vtl-drop-before { border-top:2px solid #e94560; }
     .vtl-block.vtl-drop-after { border-bottom:2px solid #e94560; }
-    .vtl-block.vtl-drop-merge { box-shadow:0 0 0 2px rgba(88,166,255,.5) inset; }
+    .vtl-block.vtl-drop-merge-before,
+    .vtl-block.vtl-drop-merge-after { box-shadow:0 0 0 2px rgba(88,166,255,.5) inset; }
+    .vtl-block.vtl-drop-merge-before { border-left:2px solid #58a6ff; }
+    .vtl-block.vtl-drop-merge-after { border-right:2px solid #58a6ff; }
     .vtl-block:hover { border-left-color:#e94560;background:#1c2129; }
     .vtl-block.vtl-warn { border-left-color:#e9a045; }
     .vtl-merge-tag {
@@ -502,15 +505,21 @@
 
   function getDropMode(event, target) {
     const rect = target.getBoundingClientRect();
-    const offset = (event.clientY - rect.top) / rect.height;
-    if (offset < 0.25) return "before";
-    if (offset > 0.75) return "after";
-    return "merge";
+    const yOffset = (event.clientY - rect.top) / rect.height;
+    if (yOffset < 0.25) return "before";
+    if (yOffset > 0.75) return "after";
+    const xOffset = (event.clientX - rect.left) / rect.width;
+    return xOffset < 0.5 ? "merge-before" : "merge-after";
   }
 
   function clearDropClasses(el) {
     if (!el) return;
-    el.classList.remove("vtl-drop-before", "vtl-drop-after", "vtl-drop-merge");
+    el.classList.remove(
+      "vtl-drop-before",
+      "vtl-drop-after",
+      "vtl-drop-merge-before",
+      "vtl-drop-merge-after"
+    );
     delete el.dataset.dropMode;
   }
 
@@ -523,11 +532,16 @@
     const [moving] = groups.splice(fromIndex, 1);
     if (!moving) return;
 
-    if (mode === "merge") {
+    if (mode === "merge-before" || mode === "merge-after") {
       const target = groups[toIndex];
       if (!target) return;
-      target.blocks = target.blocks.concat(moving.blocks);
-      target.keys = target.keys.concat(moving.keys);
+      if (mode === "merge-before") {
+        target.blocks = moving.blocks.concat(target.blocks);
+        target.keys = moving.keys.concat(target.keys);
+      } else {
+        target.blocks = target.blocks.concat(moving.blocks);
+        target.keys = target.keys.concat(moving.keys);
+      }
     } else {
       let insertIndex = toIndex;
       if (mode === "after") insertIndex = toIndex + 1;
@@ -775,7 +789,7 @@
     const info = document.createElement("div");
     info.className = "vtl-info";
     info.innerHTML =
-      '<kbd>Retry Translation</kbd> re-scans for missed text · <kbd>Click</kbd> a line to retranslate · Drag on the image to select a region · Drag lines to reorder, drop center to merge · Per-line notes auto-retranslate';
+      '<kbd>Retry Translation</kbd> re-scans for missed text · <kbd>Click</kbd> a line to retranslate · Drag on the image to select a region · Drag lines to reorder, drop left/right to merge before/after · Per-line notes auto-retranslate';
 
     panelBody = document.createElement("div");
     panelBody.className = "vtl-body";
@@ -1267,7 +1281,7 @@
       el.addEventListener("drop", e => {
         if (!dragState) return;
         e.preventDefault();
-        const mode = el.dataset.dropMode || "merge";
+        const mode = el.dataset.dropMode || "merge-after";
         const targetIndex = Number(el.dataset.group);
         if (!Number.isNaN(targetIndex)) {
           applyDragUpdate(dragState.groupIndex, targetIndex, mode);
