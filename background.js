@@ -1,22 +1,70 @@
 "use strict";
 
 // ========================= CONFIGURATION =========================
-const LLAMA_SERVER = "http://127.0.0.1:8033";
-const TARGET_LANG  = "English";
-const MAX_TOKENS   = 2048;
-const TEMPERATURE  = 0.2;
-const RETRY_TEMP   = 0.5;
-const IMG_MAX_DIM  = 1024;
+const DEFAULT_SETTINGS = {
+  LLAMA_SERVER: "http://127.0.0.1:8033",
+  TARGET_LANG: "English",
+  MAX_TOKENS: 2048,
+  TEMPERATURE: 0.2,
+  RETRY_TEMP: 0.5,
+  IMG_MAX_DIM: 1024,
+  REPEAT_PENALTY: 1.15,
+  REPEAT_LAST_N: 256,
+  FREQUENCY_PENALTY: 0.3,
+  PRESENCE_PENALTY: 0.2,
+  DRY_MULTIPLIER: 0.8,
+  DRY_BASE: 1.75,
+  DRY_ALLOWED_LENGTH: 2,
+  DRY_PENALTY_LAST_N: -1,
+  LOOP_THRESHOLD: 3,
+  RETROACTIVE_CONTEXT: true,
+};
 
-const REPEAT_PENALTY       = 1.15;
-const REPEAT_LAST_N        = 256;
-const FREQUENCY_PENALTY    = 0.3;
-const PRESENCE_PENALTY     = 0.2;
-const DRY_MULTIPLIER       = 0.8;
-const DRY_BASE             = 1.75;
-const DRY_ALLOWED_LENGTH   = 2;
-const DRY_PENALTY_LAST_N   = -1;
-const LOOP_THRESHOLD       = 3;
+let settings = { ...DEFAULT_SETTINGS };
+
+function normalizeSettings(next) {
+  if (!next || typeof next !== "object") return {};
+  const clampNum = (value, fallback, min, max) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return fallback;
+    if (min != null && num < min) return min;
+    if (max != null && num > max) return max;
+    return num;
+  };
+  const out = {};
+  if (typeof next.LLAMA_SERVER === "string") out.LLAMA_SERVER = next.LLAMA_SERVER.trim() || DEFAULT_SETTINGS.LLAMA_SERVER;
+  if (typeof next.TARGET_LANG === "string") out.TARGET_LANG = next.TARGET_LANG.trim() || DEFAULT_SETTINGS.TARGET_LANG;
+  if ("MAX_TOKENS" in next) out.MAX_TOKENS = clampNum(next.MAX_TOKENS, DEFAULT_SETTINGS.MAX_TOKENS, 128, 8192);
+  if ("TEMPERATURE" in next) out.TEMPERATURE = clampNum(next.TEMPERATURE, DEFAULT_SETTINGS.TEMPERATURE, 0, 2);
+  if ("RETRY_TEMP" in next) out.RETRY_TEMP = clampNum(next.RETRY_TEMP, DEFAULT_SETTINGS.RETRY_TEMP, 0, 2);
+  if ("IMG_MAX_DIM" in next) out.IMG_MAX_DIM = clampNum(next.IMG_MAX_DIM, DEFAULT_SETTINGS.IMG_MAX_DIM, 256, 4096);
+  if ("REPEAT_PENALTY" in next) out.REPEAT_PENALTY = clampNum(next.REPEAT_PENALTY, DEFAULT_SETTINGS.REPEAT_PENALTY, 0.8, 2.0);
+  if ("REPEAT_LAST_N" in next) out.REPEAT_LAST_N = clampNum(next.REPEAT_LAST_N, DEFAULT_SETTINGS.REPEAT_LAST_N, -1, 4096);
+  if ("FREQUENCY_PENALTY" in next) out.FREQUENCY_PENALTY = clampNum(next.FREQUENCY_PENALTY, DEFAULT_SETTINGS.FREQUENCY_PENALTY, -2, 2);
+  if ("PRESENCE_PENALTY" in next) out.PRESENCE_PENALTY = clampNum(next.PRESENCE_PENALTY, DEFAULT_SETTINGS.PRESENCE_PENALTY, -2, 2);
+  if ("DRY_MULTIPLIER" in next) out.DRY_MULTIPLIER = clampNum(next.DRY_MULTIPLIER, DEFAULT_SETTINGS.DRY_MULTIPLIER, 0, 2);
+  if ("DRY_BASE" in next) out.DRY_BASE = clampNum(next.DRY_BASE, DEFAULT_SETTINGS.DRY_BASE, 0, 4);
+  if ("DRY_ALLOWED_LENGTH" in next) out.DRY_ALLOWED_LENGTH = clampNum(next.DRY_ALLOWED_LENGTH, DEFAULT_SETTINGS.DRY_ALLOWED_LENGTH, 0, 10);
+  if ("DRY_PENALTY_LAST_N" in next) out.DRY_PENALTY_LAST_N = clampNum(next.DRY_PENALTY_LAST_N, DEFAULT_SETTINGS.DRY_PENALTY_LAST_N, -1, 4096);
+  if ("LOOP_THRESHOLD" in next) out.LOOP_THRESHOLD = clampNum(next.LOOP_THRESHOLD, DEFAULT_SETTINGS.LOOP_THRESHOLD, 2, 10);
+  if ("RETROACTIVE_CONTEXT" in next) out.RETROACTIVE_CONTEXT = !!next.RETROACTIVE_CONTEXT;
+  return out;
+}
+
+async function loadSettings() {
+  try {
+    const stored = await browser.storage.local.get("settings");
+    if (stored?.settings) {
+      settings = { ...DEFAULT_SETTINGS, ...normalizeSettings(stored.settings) };
+    }
+  } catch {}
+}
+
+loadSettings();
+
+function getTargetLang() {
+  return settings.TARGET_LANG || DEFAULT_SETTINGS.TARGET_LANG;
+}
 
 const tabState = {};
 
@@ -203,7 +251,7 @@ async function updateStoryRegistry(tabId, analysis, filteredTranslation, userNot
   ].join("\n");
 
   try {
-    const res = await fetch(LLAMA_SERVER + "/v1/chat/completions", {
+    const res = await fetch(settings.LLAMA_SERVER + "/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -222,6 +270,90 @@ async function updateStoryRegistry(tabId, analysis, filteredTranslation, userNot
   } catch (e) {
     console.warn("Registry update failed, keeping previous:", e);
   }
+}
+
+// =================== Retroactive context correction ===================
+const retroactiveQueue = new Map();
+const retroactiveInFlight = new Set();
+
+function buildLatestInfoBlock(tabId, analysis, filteredTranslation, noteOverride) {
+  const notes = noteOverride || formatUserNotes(tabId);
+  const parts = [];
+  if (analysis) parts.push("Scene analysis:\n" + analysis);
+  if (filteredTranslation) parts.push("Latest translation context:\n" + filteredTranslation);
+  if (notes) parts.push("User notes:\n" + notes);
+  return parts.join("\n\n").trim();
+}
+
+async function reviseHistoryEntry(tabId, entry, latestInfo) {
+  const registry = getRegistry(tabId);
+  const notes = formatUserNotes(tabId);
+  const sys =
+`You update stored context entries when new information arrives.
+Correct names, genders, relationships, or wording inconsistencies.
+Preserve the original structure and keep the same lines/categories.
+If nothing needs changing, output the entry exactly as-is.
+Output ONLY the updated entry.`;
+
+  const userParts = [];
+  if (registry) userParts.push("STORY REGISTRY:\n" + registry);
+  if (notes) userParts.push("USER NOTES:\n" + notes);
+  if (latestInfo) userParts.push("NEW INFO SOURCES:\n" + latestInfo);
+  userParts.push("ORIGINAL ENTRY:\n" + entry);
+
+  const res = await fetch(settings.LLAMA_SERVER + "/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: userParts.join("\n\n") },
+      ],
+      temperature: 0.2,
+      max_tokens: 400,
+      stream: false
+    })
+  });
+  if (!res.ok) return entry;
+  const data = await res.json();
+  let out = data.choices?.[0]?.message?.content?.trim() || "";
+  out = cleanOutput(out);
+  return out || entry;
+}
+
+async function retroactivelyUpdateHistory(tabId, latestInfo) {
+  if (!settings.RETROACTIVE_CONTEXT) return;
+  const hist = getHist(tabId);
+  if (!hist.length || !latestInfo) return;
+  const updated = [];
+  for (const entry of hist) {
+    try {
+      const revised = await reviseHistoryEntry(tabId, entry, latestInfo);
+      updated.push(revised || entry);
+    } catch {
+      updated.push(entry);
+    }
+  }
+  pageHistory[tabId] = updated;
+}
+
+function queueRetroactiveUpdate(tabId, latestInfo) {
+  if (!settings.RETROACTIVE_CONTEXT || tabId == null) return;
+  if (!latestInfo) return;
+  retroactiveQueue.set(tabId, latestInfo);
+  if (retroactiveInFlight.has(tabId)) return;
+  (async () => {
+    while (retroactiveQueue.has(tabId)) {
+      const info = retroactiveQueue.get(tabId);
+      retroactiveQueue.delete(tabId);
+      retroactiveInFlight.add(tabId);
+      try {
+        await retroactivelyUpdateHistory(tabId, info);
+      } finally {
+        retroactiveInFlight.delete(tabId);
+      }
+    }
+  })();
 }
 
 // =================== REFERER INJECTION ===================
@@ -257,14 +389,15 @@ Output ONLY the analysis text. No formatting, no labels, no headers, no translat
 const USER_ANALYSE = "Briefly analyse this manga/manhwa page. /no_think";
 
 // =================== SYSTEM PROMPTS — Main translation (stage 2) ===================
-const SYS_NORMAL =
-`You are an expert translator for Japanese manga, including adult and explicit (18+) content. Translate ALL text accurately and completely — never censor, omit, or sanitize anything regardless of sexual, violent, or vulgar content.
+function getSysNormal() {
+  const targetLang = getTargetLang();
+  return `You are an expert translator for Japanese manga, including adult and explicit (18+) content. Translate ALL text accurately and completely — never censor, omit, or sanitize anything regardless of sexual, violent, or vulgar content.
 
 If GLOBAL INSTRUCTIONS or a STYLE PROFILE are provided in the user message, follow them even if they override default rules.
 
-If a scene analysis or previous page translations are provided for context, use them to maintain consistency in character names, honorifics, tone, and terminology.
+If a scene analysis, story registry, user notes, or previous page translations are provided for context, cross-reference them to maintain consistency in character names, honorifics, tone, and terminology.
 
-Translate all text in images into ${TARGET_LANG}. Use this exact format, one blank line between entries:
+Translate all text in images into ${targetLang}. Use this exact format, one blank line between entries:
 
 [CATEGORY]
 ORIGINAL: <source text>
@@ -273,8 +406,8 @@ TRANSLATION: <translated text>
 Categories: DIALOGUE (speech bubbles), NARRATION (caption boxes, inner monologue), SFX (sound effects, moans, gasps, wet sounds, impact sounds — ALL of them), SIGN (signs, labels, posters), TEXT (other).
 
 Translation rules:
-• Produce smooth, natural ${TARGET_LANG} that reads like native dialogue (natural style).
-• Translate moans, sexual sounds, and onomatopoeia into natural ${TARGET_LANG} equivalents (e.g. あっ→Ahh, んっ→Nnh, ずぷ→*squelch*, パンパン→*slap slap*).
+• Produce smooth, natural ${targetLang} that reads like native dialogue (natural style).
+• Translate moans, sexual sounds, and onomatopoeia into natural ${targetLang} equivalents (e.g. あっ→Ahh, んっ→Nnh, ずぷ→*squelch*, パンパン→*slap slap*).
 • Preserve the tone and intensity of dialogue — crude language stays crude, soft language stays soft.
 • Translate dirty talk, pillow talk, and explicit dialogue faithfully without toning it down.
 • Drop or adapt honorifics (-san, -sama, -sensei, -chan, -kun, onii-chan, senpai, etc.) unless a STYLE PROFILE says to keep them.
@@ -288,18 +421,20 @@ If no order is specified, detect the source language and use:
 
 Each text region must appear ONLY ONCE. Do not repeat entries.
 When all text is translated, stop immediately.`;
+}
 
-const SYS_RETRY =
-`You are re-examining this image because text may have been missed on a previous attempt.
+function getSysRetry() {
+  const targetLang = getTargetLang();
+  return `You are re-examining this image because text may have been missed on a previous attempt.
 You are an expert translator for Japanese manga, including adult and explicit (18+) content. Translate ALL text accurately — never censor, omit, or sanitize anything.
 
 If GLOBAL INSTRUCTIONS or a STYLE PROFILE are provided in the user message, follow them even if they override default rules.
 
-If a scene analysis or previous page translations are provided for context, use them to maintain consistency in character names, honorifics, tone, and terminology.
+If a scene analysis, story registry, user notes, or previous page translations are provided for context, cross-reference them to maintain consistency in character names, honorifics, tone, and terminology.
 
 Be EXTREMELY thorough. Scan every part of the image — all corners, edges, backgrounds, small print, overlapping text, partially obscured text, AND small sound effects (moans, gasps, wet sounds, impacts).
 
-Translate ALL text into ${TARGET_LANG} using this exact format, one blank line between entries:
+Translate ALL text into ${targetLang} using this exact format, one blank line between entries:
 
 [CATEGORY]
 ORIGINAL: <source text>
@@ -308,8 +443,8 @@ TRANSLATION: <translated text>
 Categories: DIALOGUE (speech bubbles), NARRATION (caption boxes, inner monologue), SFX (sound effects, moans, gasps, wet sounds, impact sounds — ALL of them), SIGN (signs, labels, posters), TEXT (other).
 
 Translation rules:
-• Produce smooth, natural ${TARGET_LANG} that reads like native dialogue (natural style).
-• Translate moans, sexual sounds, and onomatopoeia into natural ${TARGET_LANG} equivalents.
+• Produce smooth, natural ${targetLang} that reads like native dialogue (natural style).
+• Translate moans, sexual sounds, and onomatopoeia into natural ${targetLang} equivalents.
 • Preserve tone and intensity — crude stays crude, soft stays soft.
 • Translate explicit dialogue faithfully without toning it down.
 • Drop or adapt honorifics (-san, -sama, -sensei, -chan, -kun, onii-chan, senpai, etc.) unless a STYLE PROFILE says to keep them.
@@ -323,33 +458,42 @@ If no order is specified, detect the source language and use:
 
 Do NOT skip any text, no matter how small. Include every sound effect, sign, watermark, and background text.
 Each text region must appear ONLY ONCE. Stop when all text is translated.`;
+}
 
-const USER_NORMAL = `Translate all text in this image into ${TARGET_LANG}. Include every sound effect, moan, and background text. Use correct reading order for the detected source language. Each piece of text must appear only once. /no_think`;
-const USER_RETRY  = `This is a RETRY. Look more carefully at every part of the image. Translate ALL visible text into ${TARGET_LANG}, including small sound effects, moans, gasps, signs, and background text that may have been missed before. Use correct reading order. /no_think`;
+function getUserNormal() {
+  return `Translate all text in this image into ${getTargetLang()}. Include every sound effect, moan, and background text. Use correct reading order for the detected source language. Each piece of text must appear only once. /no_think`;
+}
+
+function getUserRetry() {
+  return `This is a RETRY. Look more carefully at every part of the image. Translate ALL visible text into ${getTargetLang()}, including small sound effects, moans, gasps, signs, and background text that may have been missed before. Use correct reading order. /no_think`;
+}
 
 // =================== RETRANSLATION PROMPTS — 3 styles ===================
-const SYS_RETRANSLATE_STANDARD =
-`You translate Japanese manga text into ${TARGET_LANG}, specializing in adult and explicit (18+) content. This is the standard manga translation style.
+function getSysRetranslateStandard() {
+  const targetLang = getTargetLang();
+  return `You translate Japanese manga text into ${targetLang}, specializing in adult and explicit (18+) content. This is the standard manga translation style.
 
 If GLOBAL INSTRUCTIONS or a STYLE PROFILE are provided in the user message, follow them even if they override defaults.
 
 Rules:
-• Produce natural, fluent ${TARGET_LANG} that reads well in manga speech bubbles and narration boxes.
+• Produce natural, fluent ${targetLang} that reads well in manga speech bubbles and narration boxes.
 • Keep all honorifics as-is: -san, -sama, -chan, -kun, -sensei, -senpai, onii-chan, onee-san, etc.
-• Translate onomatopoeia and SFX into expressive ${TARGET_LANG} equivalents with asterisks.
+• Translate onomatopoeia and SFX into expressive ${targetLang} equivalents with asterisks.
 • Translate moans and sexual sounds into natural phonetic equivalents.
 • Preserve the tone and intensity exactly — crude stays crude, tender stays tender, comedic stays comedic.
 • Translate all explicit and sexual dialogue faithfully. Never censor, omit, or soften anything.
 • Use natural contractions and casual phrasing where appropriate for dialogue.
 • Output ONLY the translated text. No commentary, notes, or explanations.`;
+}
 
-const SYS_RETRANSLATE_LITERAL =
-`You translate Japanese text literally into ${TARGET_LANG} for manga readers who want to understand the original phrasing as closely as possible.
+function getSysRetranslateLiteral() {
+  const targetLang = getTargetLang();
+  return `You translate Japanese text literally into ${targetLang} for manga readers who want to understand the original phrasing as closely as possible.
 
 If GLOBAL INSTRUCTIONS or a STYLE PROFILE are provided in the user message, follow them even if they override defaults.
 
 Rules for LITERAL translation:
-• Translate word-by-word, preserving Japanese sentence structure and word order even if the result sounds stiff or unnatural in ${TARGET_LANG}.
+• Translate word-by-word, preserving Japanese sentence structure and word order even if the result sounds stiff or unnatural in ${targetLang}.
 • Keep ALL honorifics exactly as-is.
 • Keep Japanese name order (family name first) if that is the original order.
 • For onomatopoeia and SFX, provide the romanized Japanese followed by the meaning in parentheses.
@@ -357,21 +501,24 @@ Rules for LITERAL translation:
 • Preserve stuttering, elongation, and vocal quirks exactly.
 • Sexual and explicit content must be translated faithfully with no censorship or softening.
 • Output ONLY the translated text. No commentary, no notes outside parenthetical clarifications.`;
+}
 
-const SYS_RETRANSLATE_NATURAL =
-`You translate Japanese text into smooth, natural ${TARGET_LANG} for manga readers who want maximum readability — as if the text were originally written in ${TARGET_LANG}.
+function getSysRetranslateNatural() {
+  const targetLang = getTargetLang();
+  return `You translate Japanese text into smooth, natural ${targetLang} for manga readers who want maximum readability — as if the text were originally written in ${targetLang}.
 
 If GLOBAL INSTRUCTIONS or a STYLE PROFILE are provided in the user message, follow them even if they override defaults.
 
 Rules for NATURAL translation:
-• Rewrite the text so it sounds like a native ${TARGET_LANG} speaker wrote it. Prioritize flow and readability above all.
-• REMOVE or adapt honorifics to ${TARGET_LANG} equivalents where possible.
-• Convert Japanese idioms into equivalent ${TARGET_LANG} idioms or natural phrasing.
-• Convert onomatopoeia and SFX into vivid ${TARGET_LANG} action descriptions.
+• Rewrite the text so it sounds like a native ${targetLang} speaker wrote it. Prioritize flow and readability above all.
+• REMOVE or adapt honorifics to ${targetLang} equivalents where possible.
+• Convert Japanese idioms into equivalent ${targetLang} idioms or natural phrasing.
+• Convert onomatopoeia and SFX into vivid ${targetLang} action descriptions.
 • Adapt cultural references so a Western reader understands immediately without footnotes.
 • Dialogue must feel like real people talking — use contractions, casual phrasing, slang, and natural rhythm.
 • Sexual and explicit content must be translated faithfully with no censorship — make it sound natural and fluid.
 • Output ONLY the translated text. No commentary, no explanations.`;
+}
 
 // =================== CONTEXT MENUS ===================
 browser.contextMenus.create({
@@ -525,6 +672,22 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     });
   }
 
+  if (msg.action === "getSettings") {
+    return Promise.resolve({ settings });
+  }
+
+  if (msg.action === "setSettings") {
+    settings = { ...settings, ...normalizeSettings(msg.settings) };
+    browser.storage.local.set({ settings }).catch(() => {});
+    return Promise.resolve({ settings });
+  }
+
+  if (msg.action === "resetSettings") {
+    settings = { ...DEFAULT_SETTINGS };
+    browser.storage.local.set({ settings }).catch(() => {});
+    return Promise.resolve({ settings });
+  }
+
   if (msg.action === "reanalyze") {
     const state = tabState[tabId];
     if (!state?.fullB64 && !state?.b64) {
@@ -538,6 +701,10 @@ browser.runtime.onMessage.addListener((msg, sender) => {
           tabState[tabId].analysisImageUrl = state.imageUrl || null;
         }
         tell(tabId, { action: "analysis", text: analysis });
+        const filtered = filterForContext(tabState[tabId]?.lastTranslation || "", analysis);
+        updateStoryRegistry(tabId, analysis, filtered, formatUserNotes(tabId));
+        const latestInfo = buildLatestInfoBlock(tabId, analysis, filtered);
+        queueRetroactiveUpdate(tabId, latestInfo);
       } catch {
         tell(tabId, { action: "analysis", text: "" });
       }
@@ -568,6 +735,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     if (tabId != null && tabState[tabId]) {
       const filtered = filterForContext(tabState[tabId].lastTranslation || "", tabState[tabId].analysis || "");
       updateStoryRegistry(tabId, tabState[tabId].analysis || "", filtered, formatUserNotes(tabId));
+      const latestInfo = buildLatestInfoBlock(tabId, tabState[tabId].analysis || "", filtered);
+      queueRetroactiveUpdate(tabId, latestInfo);
     }
     return Promise.resolve({ ok: true });
   }
@@ -582,19 +751,21 @@ browser.tabs.onRemoved.addListener((tabId) => {
 // =================== SINGLE-ENTRY RETRANSLATION (text-only, 3 styles) ===================
 async function handleRetranslate(original, style, tabId) {
   let sys;
-  if (style === "literal")  sys = SYS_RETRANSLATE_LITERAL;
-  else if (style === "natural") sys = SYS_RETRANSLATE_NATURAL;
-  else sys = SYS_RETRANSLATE_STANDARD;
+  if (style === "literal")  sys = getSysRetranslateLiteral();
+  else if (style === "natural") sys = getSysRetranslateNatural();
+  else sys = getSysRetranslateStandard();
 
   const styleId = getStyleId(tabId);
   const stylePrompt = STYLE_PROFILES[styleId]?.prompt || "";
+  const history = buildHistoryPrefix(tabId);
 
   const userParts = [];
   if (globalInstructions) userParts.push("GLOBAL INSTRUCTIONS:\n" + globalInstructions);
   if (stylePrompt) userParts.push("STYLE PROFILE:\n" + stylePrompt);
+  if (history) userParts.push(history.trim());
   userParts.push("Translate this:\n" + original);
 
-  const res = await fetch(LLAMA_SERVER + "/v1/chat/completions", {
+  const res = await fetch(settings.LLAMA_SERVER + "/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -617,6 +788,7 @@ async function handleRetranslate(original, style, tabId) {
 // =================== SINGLE-ENTRY RETRANSLATION WITH NOTE ===================
 async function handleRetranslateWithNote(original, note, currentTranslation, styleId, tabId) {
   const stylePrompt = STYLE_PROFILES[styleId]?.prompt || "";
+  const history = buildHistoryPrefix(tabId);
 
   const sys =
 `You are an expert translator for Japanese manga, including adult and explicit (18+) content.
@@ -627,12 +799,13 @@ Output ONLY the revised translated text, no labels.`;
   const parts = [];
   if (globalInstructions) parts.push("GLOBAL INSTRUCTIONS:\n" + globalInstructions);
   if (stylePrompt) parts.push("STYLE PROFILE:\n" + stylePrompt);
+  if (history) parts.push(history.trim());
   parts.push("ORIGINAL:\n" + original);
   if (currentTranslation) parts.push("CURRENT TRANSLATION:\n" + currentTranslation);
   if (note) parts.push("LINE NOTE:\n" + note);
   parts.push("Output ONLY the revised translation:");
 
-  const res = await fetch(LLAMA_SERVER + "/v1/chat/completions", {
+  const res = await fetch(settings.LLAMA_SERVER + "/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -673,7 +846,7 @@ ${original}
 
 Should this become a global instruction?`;
 
-  const res = await fetch(LLAMA_SERVER + "/v1/chat/completions", {
+  const res = await fetch(settings.LLAMA_SERVER + "/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -713,7 +886,7 @@ async function analyseScene(base64Url, tabId) {
         + "Now briefly analyse this manga/manhwa page. /no_think"
     : USER_ANALYSE;
 
-  const res = await fetch(LLAMA_SERVER + "/v1/chat/completions", {
+  const res = await fetch(settings.LLAMA_SERVER + "/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -749,8 +922,8 @@ async function fetchBlob(url, referer) {
 
 function bitmapToJpeg(bmp, sx, sy, sw, sh) {
   let w = sw, h = sh;
-  if (Math.max(w, h) > IMG_MAX_DIM) {
-    const s = IMG_MAX_DIM / Math.max(w, h);
+  if (Math.max(w, h) > settings.IMG_MAX_DIM) {
+    const s = settings.IMG_MAX_DIM / Math.max(w, h);
     w = Math.round(w * s); h = Math.round(h * s);
   }
   const c = document.createElement("canvas");
@@ -794,15 +967,15 @@ function cleanOutput(t) {
 
 function friendlyError(err) {
   const m = err.message || String(err);
-  if (/fetch|network/i.test(m)) return "Cannot reach llama.cpp at " + LLAMA_SERVER + ".\nMake sure the server is running.";
+  if (/fetch|network/i.test(m)) return "Cannot reach llama.cpp at " + settings.LLAMA_SERVER + ".\nMake sure the server is running.";
   if (/decode|bitmap/i.test(m)) return "Could not decode image. The format may be unsupported.";
   return m;
 }
 
 function detectLoop(text) {
   const blocks = text.split(/\n\n+/).map(b => b.trim()).filter(Boolean);
-  if (blocks.length < LOOP_THRESHOLD) return false;
-  const last = blocks.slice(-LOOP_THRESHOLD);
+  if (blocks.length < settings.LOOP_THRESHOLD) return false;
+  const last = blocks.slice(-settings.LOOP_THRESHOLD);
   return last.every(b => b === last[0]);
 }
 
@@ -940,25 +1113,30 @@ async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
   if (analysis)   parts.push("Scene analysis for this page:\n" + analysis);
 
   const contextBlock = parts.length ? parts.join("\n\n") + "\n\n" : "";
-  const userText = contextBlock + orderDirective + (isRetry ? USER_RETRY : USER_NORMAL);
+  const userText = contextBlock + orderDirective + (isRetry ? getUserRetry() : getUserNormal());
 
   const payload = {
     messages: [
-      { role: "system", content: isRetry ? SYS_RETRY : SYS_NORMAL },
+      { role: "system", content: isRetry ? getSysRetry() : getSysNormal() },
       { role: "user", content: [
         { type: "image_url", image_url: { url: base64Url } },
         { type: "text", text: userText },
       ]},
     ],
-    max_tokens: MAX_TOKENS, temperature: isRetry ? RETRY_TEMP : TEMPERATURE,
+    max_tokens: settings.MAX_TOKENS,
+    temperature: isRetry ? settings.RETRY_TEMP : settings.TEMPERATURE,
     stream: true,
-    repeat_penalty: REPEAT_PENALTY, repeat_last_n: REPEAT_LAST_N,
-    frequency_penalty: FREQUENCY_PENALTY, presence_penalty: PRESENCE_PENALTY,
-    dry_multiplier: DRY_MULTIPLIER, dry_base: DRY_BASE,
-    dry_allowed_length: DRY_ALLOWED_LENGTH, dry_penalty_last_n: DRY_PENALTY_LAST_N,
+    repeat_penalty: settings.REPEAT_PENALTY,
+    repeat_last_n: settings.REPEAT_LAST_N,
+    frequency_penalty: settings.FREQUENCY_PENALTY,
+    presence_penalty: settings.PRESENCE_PENALTY,
+    dry_multiplier: settings.DRY_MULTIPLIER,
+    dry_base: settings.DRY_BASE,
+    dry_allowed_length: settings.DRY_ALLOWED_LENGTH,
+    dry_penalty_last_n: settings.DRY_PENALTY_LAST_N,
   };
 
-  const res = await fetch(LLAMA_SERVER + "/v1/chat/completions", {
+  const res = await fetch(settings.LLAMA_SERVER + "/v1/chat/completions", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
@@ -1029,6 +1207,8 @@ async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
   // —— Update story registry in background ——
   if (didUpdateContext) {
     updateStoryRegistry(tabId, analysis, histEntry, formatUserNotes(tabId));
+    const latestInfo = buildLatestInfoBlock(tabId, analysis, histEntry);
+    queueRetroactiveUpdate(tabId, latestInfo);
   }
 
   // —— Quality check (async) ——
@@ -1089,7 +1269,7 @@ Return a JSON array of objects: [{ "index": number, "reason": "short reason" }]
 If all entries look fine, return [].
 Return ONLY JSON.`;
 
-  const res = await fetch(LLAMA_SERVER + "/v1/chat/completions", {
+  const res = await fetch(settings.LLAMA_SERVER + "/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1135,7 +1315,7 @@ Respond clearly and concisely. If the user gives context, integrate it.`;
 
   const user = (parts.length ? parts.join("\n\n") + "\n\n" : "") + "USER MESSAGE:\n" + text;
 
-  const res = await fetch(LLAMA_SERVER + "/v1/chat/completions", {
+  const res = await fetch(settings.LLAMA_SERVER + "/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

@@ -18,6 +18,7 @@ VisionTranslate is a Firefox extension that translates text found inside images 
   - Right-click a line for Standard / Literal / Natural retranslation.
   - Add per-line notes that automatically trigger retranslation.
 - **Context memory**: per-tab history and a compact story registry to keep names consistent.
+- **Retroactive context updates**: automatically revises stored context when new information appears.
 - **Global instructions**: apply style/constraints across all tabs until restart.
 - **Quality check**: highlights low-confidence entries in the UI.
 - **Text-only chat**: ask questions or provide additional context to the model.
@@ -55,6 +56,7 @@ The extension sends OpenAI-style `/v1/chat/completions` requests that include `i
 - **Analysis toggle**: enable/disable scene analysis.
 - **Retry**: re-run translation if text was missed.
 - **Style dropdown**: choose a style profile (Explicit, Literal, Localized, Erotic, Crude).
+- **Settings**: open the settings menu to change server URL, language, and model tuning.
 - **Global instructions**: apply instructions across all tabs until restart.
 - **Context badge**: view stored page context and history.
 
@@ -65,7 +67,7 @@ The extension sends OpenAI-style `/v1/chat/completions` requests that include `i
 
 ## Configuration
 
-Key settings live near the top of `background.js`:
+Key settings live in the overlay **Settings** menu (⚙) and are persisted:
 
 - `LLAMA_SERVER`: server URL (default `http://127.0.0.1:8033`).
 - `TARGET_LANG`: output language (default `English`).

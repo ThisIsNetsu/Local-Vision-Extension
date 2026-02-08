@@ -376,6 +376,67 @@
       text-align:center;padding:32px 12px;
       font-size:13px;color:#484f58;
     }
+    /* ── settings modal ── */
+    .vtl-settings-modal {
+      position:fixed;inset:0;z-index:2147483646;
+      background:rgba(0,0,0,.55);
+      display:flex;align-items:center;justify-content:center;
+      backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+      font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    }
+    .vtl-settings-panel {
+      width:56rem;max-width:94vw;max-height:86vh;
+      background:#0d1117;border:1px solid #30363d;
+      border-radius:14px;display:flex;flex-direction:column;
+      box-shadow:0 20px 48px rgba(0,0,0,.55);overflow:hidden;
+    }
+    .vtl-settings-hdr {
+      display:flex;align-items:center;gap:10px;
+      padding:14px 18px;background:#161b22;
+      border-bottom:1px solid #30363d;flex-shrink:0;
+    }
+    .vtl-settings-title {
+      flex:1;font-weight:700;font-size:14px;color:#e6edf3;
+    }
+    .vtl-settings-body {
+      flex:1;overflow-y:auto;padding:16px 18px;
+      display:flex;flex-direction:column;gap:16px;
+      scrollbar-width:thin;scrollbar-color:#30363d transparent;
+    }
+    .vtl-settings-section {
+      font-size:11px;font-weight:600;color:#58a6ff;
+      text-transform:uppercase;letter-spacing:.3px;
+    }
+    .vtl-settings-grid {
+      display:grid;grid-template-columns:1fr 1fr;gap:12px;
+    }
+    .vtl-settings-field {
+      display:flex;flex-direction:column;gap:6px;
+      font-size:12px;color:#e6edf3;
+    }
+    .vtl-settings-field label {
+      font-size:10px;color:#8b949e;font-weight:600;
+      letter-spacing:.3px;text-transform:uppercase;
+    }
+    .vtl-settings-input {
+      background:#0d1117;color:#e6edf3;border:1px solid #30363d;
+      border-radius:6px;padding:6px 8px;font-size:12px;
+    }
+    .vtl-settings-help {
+      font-size:11px;color:#484f58;line-height:1.4;
+    }
+    .vtl-settings-toggle {
+      display:flex;align-items:center;gap:8px;font-size:12px;
+      color:#e6edf3;
+    }
+    .vtl-settings-actions {
+      padding:12px 18px;border-top:1px solid #30363d;
+      display:flex;align-items:center;gap:8px;
+      justify-content:flex-end;background:#161b22;
+    }
+    .vtl-settings-status {
+      margin-right:auto;font-size:11px;color:#58a6ff;
+    }
     .vtl-toast {
       position:fixed;bottom:16px;left:50%;transform:translateX(-50%);
       background:#161b22;color:#e6edf3;border:1px solid #30363d;
@@ -386,6 +447,8 @@
       .vtl-right{display:none}
       .vtl-panel{width:96vw;height:92vh}
       .vtl-ctx-modal-panel{max-width:96vw;max-height:88vh}
+      .vtl-settings-panel{max-width:96vw;max-height:88vh}
+      .vtl-settings-grid{grid-template-columns:1fr}
     }
   `;
 
@@ -583,6 +646,9 @@
   let isStreaming = false, analysisOpen = false, currentImageUrl = null;
   let lastOverlayImageUrl = null;
   let currentAnalysis = "", ctxModal = null;
+  let settingsModal = null;
+  let settingsStatus = null;
+  const settingsInputs = new Map();
   let currentHistoryCount = 0;
   let analysisEnabled = true;
   let ignoreSfx = false;
@@ -801,6 +867,9 @@
     clearTranslationsBtn.onclick = () => {
       clearTranslations();
     };
+    const settingsBtn = Object.assign(document.createElement("button"),
+      { className: "vtl-btn", textContent: "⚙ Settings", title: "Open settings" });
+    settingsBtn.onclick = openSettingsModal;
 
     const analysisBtn = Object.assign(document.createElement("button"),
       { className: "vtl-btn", textContent: analysisEnabled ? "🧠 Image Analysis: On" : "🧠 Image Analysis: Off", title: "Toggle image analysis section" });
@@ -834,7 +903,7 @@
       { className: "vtl-btn", textContent: "✕ Close", title: "Close overlay" });
     closeBtn.onclick = closeOverlay;
 
-    title.append(clearBtn, clearTranslationsBtn);
+    title.append(clearBtn, clearTranslationsBtn, settingsBtn);
     hdr.append(title, styleWrap, analysisBtn, reanalyzeBtn, retryBtn, closeBtn);
 
     const content = document.createElement("div");
@@ -1089,6 +1158,7 @@
 
   function closeOverlay() {
     closeCtxViewer();
+    closeSettingsModal();
     if (overlay) { overlay.remove(); overlay = null; panelBody = null; ctxBadge = null; }
     hideCtx();
     isStreaming = false;
@@ -1288,6 +1358,225 @@
     panel.append(hdr, body);
     ctxModal.appendChild(panel);
     document.body.appendChild(ctxModal);
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     Settings modal
+     ═══════════════════════════════════════════════════════ */
+  function closeSettingsModal() {
+    if (settingsModal) {
+      settingsModal.remove();
+      settingsModal = null;
+      settingsInputs.clear();
+      settingsStatus = null;
+    }
+  }
+
+  function addSettingsField(grid, { id, label, type = "text", step, placeholder, helpText }) {
+    const wrap = document.createElement("div");
+    wrap.className = "vtl-settings-field";
+    const lab = document.createElement("label");
+    lab.textContent = label;
+    const input = document.createElement("input");
+    input.className = "vtl-settings-input";
+    input.type = type;
+    if (step != null) input.step = step;
+    if (placeholder) input.placeholder = placeholder;
+    wrap.append(lab, input);
+    if (helpText) {
+      const help = document.createElement("div");
+      help.className = "vtl-settings-help";
+      help.textContent = helpText;
+      wrap.appendChild(help);
+    }
+    grid.appendChild(wrap);
+    settingsInputs.set(id, input);
+  }
+
+  function addSettingsToggle(container, { id, label, helpText }) {
+    const wrap = document.createElement("div");
+    wrap.className = "vtl-settings-field";
+    const toggle = document.createElement("label");
+    toggle.className = "vtl-settings-toggle";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    toggle.append(input, document.createTextNode(label));
+    wrap.appendChild(toggle);
+    if (helpText) {
+      const help = document.createElement("div");
+      help.className = "vtl-settings-help";
+      help.textContent = helpText;
+      wrap.appendChild(help);
+    }
+    container.appendChild(wrap);
+    settingsInputs.set(id, input);
+  }
+
+  async function openSettingsModal() {
+    closeSettingsModal();
+    injectCSS();
+
+    settingsModal = document.createElement("div");
+    settingsModal.className = "vtl-settings-modal";
+    settingsModal.addEventListener("click", e => { if (e.target === settingsModal) closeSettingsModal(); });
+
+    const panel = document.createElement("div");
+    panel.className = "vtl-settings-panel";
+
+    const hdr = document.createElement("div");
+    hdr.className = "vtl-settings-hdr";
+    const title = document.createElement("div");
+    title.className = "vtl-settings-title";
+    title.textContent = "Translation Settings";
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "vtl-btn vtl-btn-clear";
+    closeBtn.textContent = "✕ Close";
+    closeBtn.onclick = closeSettingsModal;
+    hdr.append(title, closeBtn);
+
+    const body = document.createElement("div");
+    body.className = "vtl-settings-body";
+
+    const intro = document.createElement("div");
+    intro.className = "vtl-settings-help";
+    intro.textContent = "These settings control the local llama.cpp endpoint, translation language, and model sampling behavior.";
+    body.appendChild(intro);
+
+    const coreTitle = document.createElement("div");
+    coreTitle.className = "vtl-settings-section";
+    coreTitle.textContent = "Core";
+    body.appendChild(coreTitle);
+
+    const coreGrid = document.createElement("div");
+    coreGrid.className = "vtl-settings-grid";
+    addSettingsField(coreGrid, {
+      id: "LLAMA_SERVER",
+      label: "Llama.cpp server URL",
+      placeholder: "http://127.0.0.1:8033"
+    });
+    addSettingsField(coreGrid, {
+      id: "TARGET_LANG",
+      label: "Target language",
+      placeholder: "English"
+    });
+    addSettingsField(coreGrid, {
+      id: "MAX_TOKENS",
+      label: "Max tokens",
+      type: "number",
+      step: "1"
+    });
+    addSettingsField(coreGrid, {
+      id: "IMG_MAX_DIM",
+      label: "Image max dimension",
+      type: "number",
+      step: "1"
+    });
+    addSettingsField(coreGrid, {
+      id: "TEMPERATURE",
+      label: "Temperature",
+      type: "number",
+      step: "0.05"
+    });
+    addSettingsField(coreGrid, {
+      id: "RETRY_TEMP",
+      label: "Retry temperature",
+      type: "number",
+      step: "0.05"
+    });
+    body.appendChild(coreGrid);
+
+    const advTitle = document.createElement("div");
+    advTitle.className = "vtl-settings-section";
+    advTitle.textContent = "Advanced penalties";
+    body.appendChild(advTitle);
+
+    const advGrid = document.createElement("div");
+    advGrid.className = "vtl-settings-grid";
+    addSettingsField(advGrid, { id: "REPEAT_PENALTY", label: "Repeat penalty", type: "number", step: "0.05" });
+    addSettingsField(advGrid, { id: "REPEAT_LAST_N", label: "Repeat last N", type: "number", step: "1" });
+    addSettingsField(advGrid, { id: "FREQUENCY_PENALTY", label: "Frequency penalty", type: "number", step: "0.05" });
+    addSettingsField(advGrid, { id: "PRESENCE_PENALTY", label: "Presence penalty", type: "number", step: "0.05" });
+    addSettingsField(advGrid, { id: "DRY_MULTIPLIER", label: "Dry multiplier", type: "number", step: "0.05" });
+    addSettingsField(advGrid, { id: "DRY_BASE", label: "Dry base", type: "number", step: "0.05" });
+    addSettingsField(advGrid, { id: "DRY_ALLOWED_LENGTH", label: "Dry allowed length", type: "number", step: "1" });
+    addSettingsField(advGrid, { id: "DRY_PENALTY_LAST_N", label: "Dry penalty last N", type: "number", step: "1" });
+    body.appendChild(advGrid);
+
+    const behaviorTitle = document.createElement("div");
+    behaviorTitle.className = "vtl-settings-section";
+    behaviorTitle.textContent = "Context behavior";
+    body.appendChild(behaviorTitle);
+    addSettingsToggle(body, {
+      id: "RETROACTIVE_CONTEXT",
+      label: "Retroactively update stored context when new info arrives",
+      helpText: "Uses scene analysis, translations, and notes to correct earlier stored context entries."
+    });
+
+    const actions = document.createElement("div");
+    actions.className = "vtl-settings-actions";
+    settingsStatus = document.createElement("span");
+    settingsStatus.className = "vtl-settings-status";
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "vtl-btn vtl-btn-clear";
+    resetBtn.textContent = "Reset defaults";
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "vtl-btn";
+    saveBtn.textContent = "Save settings";
+    actions.append(settingsStatus, resetBtn, saveBtn);
+
+    resetBtn.onclick = async () => {
+      settingsStatus.textContent = "Resetting…";
+      try {
+        const resp = await browser.runtime.sendMessage({ action: "resetSettings" });
+        const next = resp?.settings || {};
+        settingsInputs.forEach((input, id) => {
+          if (input.type === "checkbox") {
+            input.checked = !!next[id];
+          } else if (next[id] != null) {
+            input.value = String(next[id]);
+          }
+        });
+        settingsStatus.textContent = "Defaults restored";
+        setTimeout(() => { if (settingsStatus) settingsStatus.textContent = ""; }, 1500);
+      } catch {
+        settingsStatus.textContent = "Failed to reset";
+      }
+    };
+
+    saveBtn.onclick = async () => {
+      const payload = {};
+      settingsInputs.forEach((input, id) => {
+        if (input.type === "checkbox") {
+          payload[id] = input.checked;
+        } else if (input.value !== "") {
+          payload[id] = input.value;
+        }
+      });
+      settingsStatus.textContent = "Saving…";
+      try {
+        await browser.runtime.sendMessage({ action: "setSettings", settings: payload });
+        settingsStatus.textContent = "Saved";
+        setTimeout(() => { if (settingsStatus) settingsStatus.textContent = ""; }, 1500);
+      } catch {
+        settingsStatus.textContent = "Failed to save";
+      }
+    };
+
+    panel.append(hdr, body, actions);
+    settingsModal.appendChild(panel);
+    document.body.appendChild(settingsModal);
+
+    try {
+      const resp = await browser.runtime.sendMessage({ action: "getSettings" });
+      const current = resp?.settings || {};
+      settingsInputs.forEach((input, id) => {
+        if (input.type === "checkbox") {
+          input.checked = !!current[id];
+        } else if (current[id] != null) {
+          input.value = String(current[id]);
+        }
+      });
+    } catch {}
   }
 
   /* ═══════════════════════════════════════════════════════
