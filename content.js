@@ -199,14 +199,10 @@
     }
     .vtl-analysis-hdr {
       padding:9px 12px;font-size:12px;font-weight:600;color:#58a6ff;
-      cursor:pointer;display:flex;align-items:center;gap:7px;
+      display:flex;align-items:center;gap:7px;
       transition:background .15s;user-select:none;
     }
     .vtl-analysis-hdr:hover { background:#1c2129; }
-    .vtl-analysis-arrow {
-      font-size:9px;transition:transform .2s;display:inline-block;
-    }
-    .vtl-analysis-arrow.open { transform:rotate(90deg); }
     .vtl-analysis-body {
       padding:10px 12px;font-size:12px;color:#8b949e;
       line-height:1.65;border-top:1px solid #21262d;
@@ -372,6 +368,13 @@
       line-height:1.65;white-space:pre-wrap;word-break:break-word;
       font-family:'Cascadia Code','Fira Code','Consolas',monospace;
     }
+    .vtl-ctx-note {
+      width:100%;margin:0 12px 12px;
+      background:#0d1117;color:#e6edf3;border:1px solid #30363d;
+      border-radius:6px;padding:8px 10px;font-size:11.5px;
+      resize:vertical;min-height:40px;max-height:120px;
+    }
+    .vtl-ctx-note::placeholder { color:#484f58; }
     .vtl-ctx-empty {
       text-align:center;padding:32px 12px;
       font-size:13px;color:#484f58;
@@ -422,6 +425,11 @@
       background:#0d1117;color:#e6edf3;border:1px solid #30363d;
       border-radius:6px;padding:6px 8px;font-size:12px;
     }
+    .vtl-settings-select {
+      background:#0d1117;color:#e6edf3;border:1px solid #30363d;
+      border-radius:6px;padding:5px 8px;font-size:11px;
+    }
+    .vtl-settings-select option { background:#0d1117;color:#e6edf3; }
     .vtl-settings-help {
       font-size:11px;color:#484f58;line-height:1.4;
     }
@@ -643,12 +651,13 @@
      Overlay / Panel
      ═══════════════════════════════════════════════════════ */
   let overlay = null, panelBody = null, ctxMenu = null, ctxBadge = null;
-  let isStreaming = false, analysisOpen = false, currentImageUrl = null;
+  let isStreaming = false, currentImageUrl = null;
   let lastOverlayImageUrl = null;
   let currentAnalysis = "", ctxModal = null;
   let settingsModal = null;
   let settingsStatus = null;
   const settingsInputs = new Map();
+  const settingsSelects = new Map();
   let currentHistoryCount = 0;
   let analysisEnabled = true;
   let ignoreSfx = false;
@@ -762,7 +771,6 @@
     closeOverlay();
     injectCSS();
     isStreaming = true;
-    analysisOpen = true;
     currentAnalysis = "";
     currentImageUrl = imageUrl;
     const isNewImage = imageUrl && imageUrl !== lastOverlayImageUrl;
@@ -1280,9 +1288,11 @@
     closeCtxViewer();
 
     let pages;
+    let notes;
     try {
       const resp = await browser.runtime.sendMessage({ action: "getHistory" });
       pages = resp?.history || [];
+      notes = resp?.notes || [];
     } catch { pages = []; }
 
     ctxModal = document.createElement("div");
@@ -1344,13 +1354,32 @@
         pageBody.textContent = text;
         pageBody.style.display = openState[i] ? "block" : "none";
 
+        const note = document.createElement("textarea");
+        note.className = "vtl-ctx-note";
+        note.rows = 2;
+        note.placeholder = "Add a note for this stored context entry (used for future translations)…";
+        note.value = notes?.[i] || "";
+        note.style.display = openState[i] ? "block" : "none";
+        let noteTimer = null;
+        note.addEventListener("input", () => {
+          if (noteTimer) clearTimeout(noteTimer);
+          noteTimer = setTimeout(() => {
+            browser.runtime.sendMessage({
+              action: "setContextEntryNote",
+              index: i,
+              text: note.value
+            }).catch(() => {});
+          }, 500);
+        });
+
         pageHdr.addEventListener("click", () => {
           openState[i] = !openState[i];
           pageBody.style.display = openState[i] ? "block" : "none";
+          note.style.display = openState[i] ? "block" : "none";
           arrow.classList.toggle("open", openState[i]);
         });
 
-        page.append(pageHdr, pageBody);
+        page.append(pageHdr, pageBody, note);
         body.appendChild(page);
       });
     }
@@ -1368,11 +1397,12 @@
       settingsModal.remove();
       settingsModal = null;
       settingsInputs.clear();
+      settingsSelects.clear();
       settingsStatus = null;
     }
   }
 
-  function addSettingsField(grid, { id, label, type = "text", step, placeholder, helpText }) {
+  function addSettingsField(grid, { id, label, type = "text", step, placeholder, helpText, options }) {
     const wrap = document.createElement("div");
     wrap.className = "vtl-settings-field";
     const lab = document.createElement("label");
@@ -1383,6 +1413,27 @@
     if (step != null) input.step = step;
     if (placeholder) input.placeholder = placeholder;
     wrap.append(lab, input);
+    if (Array.isArray(options) && options.length) {
+      const select = document.createElement("select");
+      select.className = "vtl-settings-select";
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "Suggested values…";
+      select.appendChild(empty);
+      options.forEach(option => {
+        const opt = document.createElement("option");
+        opt.value = option.value;
+        opt.textContent = option.label;
+        if (option.color) opt.style.color = option.color;
+        select.appendChild(opt);
+      });
+      select.addEventListener("change", () => {
+        if (select.value === "") return;
+        input.value = select.value;
+      });
+      wrap.appendChild(select);
+      settingsSelects.set(id, select);
+    }
     if (helpText) {
       const help = document.createElement("div");
       help.className = "vtl-settings-help";
@@ -1442,6 +1493,56 @@
     intro.textContent = "These settings control the local llama.cpp endpoint, translation language, and model sampling behavior.";
     body.appendChild(intro);
 
+    const presetWrap = document.createElement("div");
+    presetWrap.className = "vtl-settings-field";
+    const presetLabel = document.createElement("label");
+    presetLabel.textContent = "Quick presets";
+    const presetSelect = document.createElement("select");
+    presetSelect.className = "vtl-settings-select";
+    const presetEmpty = document.createElement("option");
+    presetEmpty.value = "";
+    presetEmpty.textContent = "Pick a preset…";
+    presetSelect.appendChild(presetEmpty);
+    const presets = [
+      {
+        id: "balanced",
+        label: "Balanced (recommended)",
+        values: { MAX_TOKENS: 2048, TEMPERATURE: 0.2, RETRY_TEMP: 0.5, REPEAT_PENALTY: 1.15 }
+      },
+      {
+        id: "creative",
+        label: "Creative (looser wording)",
+        values: { TEMPERATURE: 0.7, RETRY_TEMP: 0.9, FREQUENCY_PENALTY: 0.1, PRESENCE_PENALTY: 0.2 }
+      },
+      {
+        id: "strict",
+        label: "Strict (more literal)",
+        values: { TEMPERATURE: 0.1, RETRY_TEMP: 0.3, REPEAT_PENALTY: 1.2, FREQUENCY_PENALTY: 0.4 }
+      },
+      {
+        id: "long",
+        label: "Long output (big pages)",
+        values: { MAX_TOKENS: 4096, TEMPERATURE: 0.25, RETRY_TEMP: 0.6 }
+      }
+    ];
+    presets.forEach(preset => {
+      const opt = document.createElement("option");
+      opt.value = preset.id;
+      opt.textContent = preset.label;
+      presetSelect.appendChild(opt);
+    });
+    presetSelect.addEventListener("change", () => {
+      const preset = presets.find(p => p.id === presetSelect.value);
+      if (!preset) return;
+      Object.entries(preset.values).forEach(([key, value]) => {
+        const input = settingsInputs.get(key);
+        if (input) input.value = String(value);
+      });
+      if (settingsStatus) settingsStatus.textContent = "Preset loaded (review and save)";
+    });
+    presetWrap.append(presetLabel, presetSelect);
+    body.appendChild(presetWrap);
+
     const coreTitle = document.createElement("div");
     coreTitle.className = "vtl-settings-section";
     coreTitle.textContent = "Core";
@@ -1452,36 +1553,77 @@
     addSettingsField(coreGrid, {
       id: "LLAMA_SERVER",
       label: "Llama.cpp server URL",
-      placeholder: "http://127.0.0.1:8033"
+      placeholder: "http://127.0.0.1:8033",
+      options: [
+        { value: "http://127.0.0.1:8033", label: "127.0.0.1:8033 (local default)", color: "#58a6ff" },
+        { value: "http://localhost:8033", label: "localhost:8033 (local)", color: "#58a6ff" },
+        { value: "http://127.0.0.1:8080", label: "127.0.0.1:8080 (alt port)", color: "#e9a045" },
+        { value: "http://localhost:8080", label: "localhost:8080 (alt port)", color: "#e9a045" }
+      ]
     });
     addSettingsField(coreGrid, {
       id: "TARGET_LANG",
       label: "Target language",
-      placeholder: "English"
+      placeholder: "English",
+      options: [
+        { value: "English", label: "English (default)", color: "#45e980" },
+        { value: "Spanish", label: "Spanish (common)", color: "#58a6ff" },
+        { value: "Portuguese", label: "Portuguese (common)", color: "#58a6ff" },
+        { value: "French", label: "French (common)", color: "#58a6ff" },
+        { value: "German", label: "German (common)", color: "#58a6ff" },
+        { value: "Indonesian", label: "Indonesian (common)", color: "#58a6ff" }
+      ]
     });
     addSettingsField(coreGrid, {
       id: "MAX_TOKENS",
       label: "Max tokens",
       type: "number",
-      step: "1"
+      step: "1",
+      options: [
+        { value: "512", label: "512 (short)", color: "#e9a045" },
+        { value: "1024", label: "1024 (compact)", color: "#58a6ff" },
+        { value: "2048", label: "2048 (balanced)", color: "#45e980" },
+        { value: "4096", label: "4096 (long)", color: "#e9a045" },
+        { value: "8192", label: "8192 (very long)", color: "#e94560" }
+      ]
     });
     addSettingsField(coreGrid, {
       id: "IMG_MAX_DIM",
       label: "Image max dimension",
       type: "number",
-      step: "1"
+      step: "1",
+      options: [
+        { value: "768", label: "768 (fast)", color: "#58a6ff" },
+        { value: "1024", label: "1024 (balanced)", color: "#45e980" },
+        { value: "1536", label: "1536 (detail)", color: "#e9a045" },
+        { value: "2048", label: "2048 (hi-res)", color: "#e94560" }
+      ]
     });
     addSettingsField(coreGrid, {
       id: "TEMPERATURE",
       label: "Temperature",
       type: "number",
-      step: "0.05"
+      step: "0.05",
+      options: [
+        { value: "0.1", label: "0.1 (very strict)", color: "#45e980" },
+        { value: "0.2", label: "0.2 (stable)", color: "#45e980" },
+        { value: "0.4", label: "0.4 (balanced)", color: "#58a6ff" },
+        { value: "0.7", label: "0.7 (creative)", color: "#e9a045" },
+        { value: "1.0", label: "1.0 (risky)", color: "#e94560" }
+      ]
     });
     addSettingsField(coreGrid, {
       id: "RETRY_TEMP",
       label: "Retry temperature",
       type: "number",
-      step: "0.05"
+      step: "0.05",
+      options: [
+        { value: "0.3", label: "0.3 (careful)", color: "#45e980" },
+        { value: "0.5", label: "0.5 (balanced)", color: "#58a6ff" },
+        { value: "0.7", label: "0.7 (creative)", color: "#e9a045" },
+        { value: "0.9", label: "0.9 (bold)", color: "#e9a045" },
+        { value: "1.2", label: "1.2 (unstable)", color: "#e94560" }
+      ]
     });
     body.appendChild(coreGrid);
 
@@ -1492,14 +1634,102 @@
 
     const advGrid = document.createElement("div");
     advGrid.className = "vtl-settings-grid";
-    addSettingsField(advGrid, { id: "REPEAT_PENALTY", label: "Repeat penalty", type: "number", step: "0.05" });
-    addSettingsField(advGrid, { id: "REPEAT_LAST_N", label: "Repeat last N", type: "number", step: "1" });
-    addSettingsField(advGrid, { id: "FREQUENCY_PENALTY", label: "Frequency penalty", type: "number", step: "0.05" });
-    addSettingsField(advGrid, { id: "PRESENCE_PENALTY", label: "Presence penalty", type: "number", step: "0.05" });
-    addSettingsField(advGrid, { id: "DRY_MULTIPLIER", label: "Dry multiplier", type: "number", step: "0.05" });
-    addSettingsField(advGrid, { id: "DRY_BASE", label: "Dry base", type: "number", step: "0.05" });
-    addSettingsField(advGrid, { id: "DRY_ALLOWED_LENGTH", label: "Dry allowed length", type: "number", step: "1" });
-    addSettingsField(advGrid, { id: "DRY_PENALTY_LAST_N", label: "Dry penalty last N", type: "number", step: "1" });
+    addSettingsField(advGrid, {
+      id: "REPEAT_PENALTY",
+      label: "Repeat penalty",
+      type: "number",
+      step: "0.05",
+      options: [
+        { value: "1.05", label: "1.05 (light)", color: "#58a6ff" },
+        { value: "1.15", label: "1.15 (balanced)", color: "#45e980" },
+        { value: "1.25", label: "1.25 (strong)", color: "#e9a045" },
+        { value: "1.4", label: "1.4 (aggressive)", color: "#e94560" }
+      ]
+    });
+    addSettingsField(advGrid, {
+      id: "REPEAT_LAST_N",
+      label: "Repeat last N",
+      type: "number",
+      step: "1",
+      options: [
+        { value: "128", label: "128 (short)", color: "#58a6ff" },
+        { value: "256", label: "256 (balanced)", color: "#45e980" },
+        { value: "512", label: "512 (long)", color: "#e9a045" },
+        { value: "1024", label: "1024 (very long)", color: "#e94560" }
+      ]
+    });
+    addSettingsField(advGrid, {
+      id: "FREQUENCY_PENALTY",
+      label: "Frequency penalty",
+      type: "number",
+      step: "0.05",
+      options: [
+        { value: "0.0", label: "0.0 (none)", color: "#58a6ff" },
+        { value: "0.2", label: "0.2 (light)", color: "#45e980" },
+        { value: "0.4", label: "0.4 (balanced)", color: "#e9a045" },
+        { value: "0.8", label: "0.8 (strong)", color: "#e94560" }
+      ]
+    });
+    addSettingsField(advGrid, {
+      id: "PRESENCE_PENALTY",
+      label: "Presence penalty",
+      type: "number",
+      step: "0.05",
+      options: [
+        { value: "0.0", label: "0.0 (none)", color: "#58a6ff" },
+        { value: "0.2", label: "0.2 (light)", color: "#45e980" },
+        { value: "0.4", label: "0.4 (balanced)", color: "#e9a045" },
+        { value: "0.8", label: "0.8 (strong)", color: "#e94560" }
+      ]
+    });
+    addSettingsField(advGrid, {
+      id: "DRY_MULTIPLIER",
+      label: "Dry multiplier",
+      type: "number",
+      step: "0.05",
+      options: [
+        { value: "0.0", label: "0.0 (off)", color: "#58a6ff" },
+        { value: "0.8", label: "0.8 (default)", color: "#45e980" },
+        { value: "1.2", label: "1.2 (strong)", color: "#e9a045" },
+        { value: "1.6", label: "1.6 (very strong)", color: "#e94560" }
+      ]
+    });
+    addSettingsField(advGrid, {
+      id: "DRY_BASE",
+      label: "Dry base",
+      type: "number",
+      step: "0.05",
+      options: [
+        { value: "1.0", label: "1.0 (mild)", color: "#58a6ff" },
+        { value: "1.75", label: "1.75 (balanced)", color: "#45e980" },
+        { value: "2.5", label: "2.5 (strong)", color: "#e9a045" },
+        { value: "3.5", label: "3.5 (very strong)", color: "#e94560" }
+      ]
+    });
+    addSettingsField(advGrid, {
+      id: "DRY_ALLOWED_LENGTH",
+      label: "Dry allowed length",
+      type: "number",
+      step: "1",
+      options: [
+        { value: "1", label: "1 (strict)", color: "#58a6ff" },
+        { value: "2", label: "2 (balanced)", color: "#45e980" },
+        { value: "3", label: "3 (lenient)", color: "#e9a045" },
+        { value: "5", label: "5 (loose)", color: "#e94560" }
+      ]
+    });
+    addSettingsField(advGrid, {
+      id: "DRY_PENALTY_LAST_N",
+      label: "Dry penalty last N",
+      type: "number",
+      step: "1",
+      options: [
+        { value: "-1", label: "-1 (auto)", color: "#45e980" },
+        { value: "256", label: "256 (short)", color: "#58a6ff" },
+        { value: "512", label: "512 (balanced)", color: "#e9a045" },
+        { value: "1024", label: "1024 (long)", color: "#e94560" }
+      ]
+    });
     body.appendChild(advGrid);
 
     const behaviorTitle = document.createElement("div");
@@ -1536,6 +1766,7 @@
             input.value = String(next[id]);
           }
         });
+        settingsSelects.forEach(select => { select.value = ""; });
         settingsStatus.textContent = "Defaults restored";
         setTimeout(() => { if (settingsStatus) settingsStatus.textContent = ""; }, 1500);
       } catch {
@@ -1576,34 +1807,22 @@
           input.value = String(current[id]);
         }
       });
+      settingsSelects.forEach(select => { select.value = ""; });
     } catch {}
   }
 
   /* ═══════════════════════════════════════════════════════
      Render helpers
      ═══════════════════════════════════════════════════════ */
-  function attachAnalysisToggle() {
-    const hdr = panelBody?.querySelector("[data-vtl-toggle]");
-    if (!hdr) return;
-    hdr.addEventListener("click", () => {
-      analysisOpen = !analysisOpen;
-      const body  = hdr.nextElementSibling;
-      const arrow = hdr.querySelector(".vtl-analysis-arrow");
-      body.style.display = analysisOpen ? "block" : "none";
-      if (arrow) arrow.classList.toggle("open", analysisOpen);
-    });
-  }
-
   function buildAnalysisHTML() {
     const analysisText = currentAnalysis
       ? esc(currentAnalysis)
       : (analysisEnabled ? "Analyzing image…" : "Image analysis is turned off.");
     return '<div class="vtl-analysis">' +
-      '<div class="vtl-analysis-hdr" data-vtl-toggle>' +
-        '<span class="vtl-analysis-arrow' + (analysisOpen ? " open" : "") + '">▶</span>' +
+      '<div class="vtl-analysis-hdr">' +
         ' Image Analysis' +
       '</div>' +
-      '<div class="vtl-analysis-body" style="display:' + (analysisOpen ? "block" : "none") + '">' +
+      '<div class="vtl-analysis-body" style="display:block">' +
         analysisText +
       '</div></div>';
   }
@@ -1631,7 +1850,6 @@
         html += '<div class="vtl-status vtl-pulse">Translating</div>';
       }
       panelBody.innerHTML = html;
-      attachAnalysisToggle();
       scrollTranslationsToLatest();
       return;
     }
@@ -1658,7 +1876,6 @@
     if (live) html += '<div class="vtl-status vtl-pulse">Translating</div>';
 
     panelBody.innerHTML = html;
-    attachAnalysisToggle();
     panelBody.querySelectorAll(".vtl-block").forEach(el => {
       el.addEventListener("click", onCtx);
       el.addEventListener("dragstart", e => {
