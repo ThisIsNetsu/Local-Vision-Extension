@@ -66,6 +66,15 @@
       border-radius:6px;padding:5px 10px;font-size:12px;
       cursor:pointer;
     }
+    .vtl-select-wrap {
+      display:flex;align-items:center;gap:6px;
+      padding:4px 8px;border-radius:8px;
+      background:#0b0f14;border:1px solid #21262d;
+    }
+    .vtl-select-label {
+      font-size:10px;color:#8b949e;font-weight:600;letter-spacing:.2px;
+      text-transform:uppercase;
+    }
     .vtl-content {
       flex:1;display:flex;overflow:hidden;
     }
@@ -171,6 +180,11 @@
       display:inline-flex;align-items:center;gap:6px;cursor:pointer;
     }
     .vtl-order input { accent-color:#e94560; }
+    .vtl-order-group {
+      display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;
+      padding:6px 10px;border-radius:8px;
+      background:#0b0f14;border:1px solid #21262d;
+    }
     /* ── analysis section ── */
     .vtl-analysis {
       margin:0 0 10px;border-radius:8px;
@@ -455,7 +469,7 @@
       ...block,
       index,
       key: `${block.cat}|${block.orig}|${index}`
-    }));
+    })).filter(entry => !deletedKeys.has(entry.key));
     const remaining = entries.slice();
     const used = new Set();
     const groups = [];
@@ -569,6 +583,7 @@
   let lastIncomingText = "";
   let appendHistoryText = "";
   let appendTranslations = true;
+  let keepTranslationsOnNewImage = false;
   let appendWarnMap = {};
   let appendBaseCount = 0;
   let appendSegments = [];
@@ -576,6 +591,7 @@
   let orderAuto = null, orderRtl = null, orderTtb = null;
   let ignoreSfxToggle = null;
   let appendToggle = null;
+  let keepTranslationsToggle = null;
   let styleSelect = null;
   let overlayImage = null;
   let overlayImageWrap = null;
@@ -585,6 +601,7 @@
   let warnMap = {};
   const noteMap = new Map();
   const noteTimers = new Map();
+  const deletedKeys = new Set();
   let customOrder = null;
   let currentRenderGroups = [];
   let dragState = null;
@@ -659,6 +676,10 @@
         ignoreSfxToggle.checked = !!resp.ignoreSfx;
         ignoreSfx = !!resp.ignoreSfx;
       }
+      if (resp?.keepTranslationsOnNewImage != null && keepTranslationsToggle) {
+        keepTranslationsToggle.checked = !!resp.keepTranslationsOnNewImage;
+        keepTranslationsOnNewImage = !!resp.keepTranslationsOnNewImage;
+      }
     } catch {}
   }
 
@@ -670,7 +691,7 @@
     currentAnalysis = "";
     currentImageUrl = imageUrl;
     const isNewImage = imageUrl && imageUrl !== lastOverlayImageUrl;
-    if (isNewImage) {
+    if (isNewImage && !keepTranslationsOnNewImage) {
       appendHistoryText = "";
       appendWarnMap = {};
       appendBaseCount = 0;
@@ -678,6 +699,10 @@
       warnMap = {};
       lastIncomingText = "";
       lastText = "";
+      deletedKeys.clear();
+      noteMap.clear();
+      noteTimers.forEach(timer => clearTimeout(timer));
+      noteTimers.clear();
     } else {
       lastIncomingText = "";
     }
@@ -689,6 +714,10 @@
       appendBaseCount = 0;
       appendSegments = [];
       warnMap = {};
+      deletedKeys.clear();
+      noteMap.clear();
+      noteTimers.forEach(timer => clearTimeout(timer));
+      noteTimers.clear();
     } else {
       lastText = appendHistoryText;
       warnMap = { ...appendWarnMap };
@@ -741,6 +770,12 @@
       browser.runtime.sendMessage({ action: "setStyle", styleId: styleSelect.value });
       toast("Style set: " + styleSelect.options[styleSelect.selectedIndex].text);
     });
+    const styleWrap = document.createElement("div");
+    styleWrap.className = "vtl-select-wrap";
+    const styleLabel = document.createElement("span");
+    styleLabel.className = "vtl-select-label";
+    styleLabel.textContent = "Translation tone";
+    styleWrap.append(styleLabel, styleSelect);
 
     const clearBtn = Object.assign(document.createElement("button"),
       { className: "vtl-btn vtl-btn-clear", textContent: "🗑 Clear Context", title: "Clear stored context for this tab" });
@@ -751,6 +786,11 @@
         clearBtn.textContent = "✓ Cleared";
         setTimeout(() => { clearBtn.textContent = "🗑 Clear Context"; }, 1500);
       } catch {}
+    };
+    const clearTranslationsBtn = Object.assign(document.createElement("button"),
+      { className: "vtl-btn vtl-btn-clear", textContent: "🧹 Clear Translations", title: "Clear the current translation list" });
+    clearTranslationsBtn.onclick = () => {
+      clearTranslations();
     };
 
     const analysisBtn = Object.assign(document.createElement("button"),
@@ -772,13 +812,21 @@
       panelBody.innerHTML = '<div class="vtl-status vtl-pulse">Re-scanning image</div>';
       browser.runtime.sendMessage({ action: "retry", manualOrder: buildManualOrderPayload() });
     };
+    const reanalyzeBtn = Object.assign(document.createElement("button"),
+      { className: "vtl-btn", textContent: "🔎 Re-analyze", title: "Re-run scene analysis for this image" });
+    reanalyzeBtn.onclick = () => {
+      if (!currentImageUrl) return;
+      currentAnalysis = "";
+      if (panelBody) panelBody.innerHTML = '<div class="vtl-status vtl-pulse">Re-analyzing image</div>';
+      browser.runtime.sendMessage({ action: "reanalyze" });
+    };
 
     const closeBtn = Object.assign(document.createElement("button"),
       { className: "vtl-btn", textContent: "✕ Close", title: "Close overlay" });
     closeBtn.onclick = closeOverlay;
 
-    title.appendChild(clearBtn);
-    hdr.append(title, styleSelect, analysisBtn, retryBtn, closeBtn);
+    title.append(clearBtn, clearTranslationsBtn);
+    hdr.append(title, styleWrap, analysisBtn, reanalyzeBtn, retryBtn, closeBtn);
 
     const content = document.createElement("div");
     content.className = "vtl-content";
@@ -805,6 +853,8 @@
     globalTextarea.placeholder = 'e.g. "Ignore SFX" or "Character A is male"';
     const orderRow = document.createElement("div");
     orderRow.className = "vtl-order";
+    const orderGroup = document.createElement("div");
+    orderGroup.className = "vtl-order-group";
     const orderTitle = document.createElement("span");
     orderTitle.textContent = "Reading order:";
     orderAuto = document.createElement("input");
@@ -821,6 +871,7 @@
     orderTtb.checked = true;
     const orderTtbLabel = document.createElement("label");
     orderTtbLabel.append(orderTtb, document.createTextNode("Top-to-bottom"));
+    orderGroup.append(orderTitle, orderAutoLabel, orderRtlLabel, orderTtbLabel);
     const ignoreSfxLabel = document.createElement("label");
     ignoreSfxToggle = document.createElement("input");
     ignoreSfxToggle.type = "checkbox";
@@ -831,7 +882,12 @@
     appendToggle.type = "checkbox";
     appendToggle.checked = appendTranslations;
     appendLabel.append(appendToggle, document.createTextNode("Append translations"));
-    orderRow.append(orderTitle, orderAutoLabel, orderRtlLabel, orderTtbLabel, ignoreSfxLabel, appendLabel);
+    const keepLabel = document.createElement("label");
+    keepTranslationsToggle = document.createElement("input");
+    keepTranslationsToggle.type = "checkbox";
+    keepTranslationsToggle.checked = keepTranslationsOnNewImage;
+    keepLabel.append(keepTranslationsToggle, document.createTextNode("Keep translations on new images"));
+    orderRow.append(orderGroup, ignoreSfxLabel, appendLabel, keepLabel);
     const gActions = document.createElement("div");
     gActions.className = "vtl-global-actions";
     const gApply = Object.assign(document.createElement("button"), { className: "vtl-btn", textContent: "Apply", title: "Save global instructions" });
@@ -896,6 +952,13 @@
         lastText = lastIncomingText;
       }
       render(lastText, isStreaming);
+    });
+    keepTranslationsToggle.addEventListener("change", () => {
+      keepTranslationsOnNewImage = keepTranslationsToggle.checked;
+      browser.runtime.sendMessage({
+        action: "setKeepTranslationsOnNewImage",
+        keepTranslationsOnNewImage
+      });
     });
     gRetry.onclick = () => {
       browser.runtime.sendMessage({ action: "retry", manualOrder: buildManualOrderPayload() });
@@ -1011,6 +1074,25 @@
     document.documentElement.style.overflow = prevOverflow;
     document.body.style.overflow = prevBodyOverflow;
     unbindOverlayKeys();
+  }
+
+  function clearTranslations() {
+    lastIncomingText = "";
+    lastText = "";
+    appendHistoryText = "";
+    appendWarnMap = {};
+    appendBaseCount = 0;
+    appendSegments = [];
+    warnMap = {};
+    customOrder = null;
+    currentRenderGroups = [];
+    dragState = null;
+    deletedKeys.clear();
+    noteMap.clear();
+    noteTimers.forEach(timer => clearTimeout(timer));
+    noteTimers.clear();
+    render("", false);
+    toast("Translations cleared");
   }
 
   function cancelOverlaySelection() {
@@ -1239,7 +1321,7 @@
       const cat = groupBlocks[0].cat || "TEXT";
       const key = groupBlocks.map(b => b.key).join("||");
       const warn = groupBlocks.some(b => warnMap[b.index]);
-      html += '<div class="vtl-block' + (warn ? " vtl-warn" : "") + '" data-i="' + i + '" data-group="' + i + '" draggable="true">' +
+      html += '<div class="vtl-block' + (warn ? " vtl-warn" : "") + '" data-i="' + i + '" data-group="' + i + '" data-keys="' + escAttr(key) + '" draggable="true">' +
         (warn ? '<span class="vtl-warn-tag" title="' + escAttr(warn) + '">⚠</span>' : "") +
         (merged ? '<span class="vtl-merge-tag">Merged</span>' : "") +
         '<span class="vtl-badge vtl-badge-' + cat.toLowerCase() + '">' + cat + "</span>" +
@@ -1350,6 +1432,7 @@
     if (!transEl) return;
     const orig = transEl.dataset.orig;
     if (!orig) return;
+    const keys = (e.currentTarget.dataset.keys || "").split("||").filter(Boolean);
 
     const menu = document.createElement("div");
     menu.className = "vtl-ctx";
@@ -1378,6 +1461,27 @@
         menu.appendChild(sep);
       }
     });
+
+    if (keys.length) {
+      const sep = document.createElement("div");
+      sep.className = "vtl-ctx-sep";
+      menu.appendChild(sep);
+
+      const del = document.createElement("div");
+      del.className = "vtl-ctx-item";
+      del.textContent = "🗑  Remove entry";
+      del.onclick = () => {
+        keys.forEach(key => deletedKeys.add(key));
+        hideCtx();
+        render(lastText, isStreaming);
+      };
+      menu.appendChild(del);
+
+      const desc = document.createElement("div");
+      desc.className = "vtl-ctx-desc";
+      desc.textContent = "Hide this line from the current list";
+      menu.appendChild(desc);
+    }
 
     document.body.appendChild(menu);
     const mw = menu.offsetWidth, mh = menu.offsetHeight;

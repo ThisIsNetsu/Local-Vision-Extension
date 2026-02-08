@@ -46,7 +46,7 @@ const STYLE_PROFILES = {
     prompt: "Preserve vulgarity and harshness. Avoid softening. Keep the raw tone.",
   },
 };
-const DEFAULT_STYLE = "explicit";
+const DEFAULT_STYLE = "localized";
 
 function getStyleId(tid) {
   return tabState[tid]?.styleId || DEFAULT_STYLE;
@@ -58,6 +58,10 @@ function getIgnoreSfx(tid) {
 
 function getReadingOrder(tid) {
   return tabState[tid]?.readingOrder || { auto: true, rtl: false, ttb: true };
+}
+
+function getKeepTranslationsOnNewImage(tid) {
+  return tabState[tid]?.keepTranslationsOnNewImage ?? false;
 }
 
 // =================== Page history for translation continuity ===================
@@ -222,11 +226,11 @@ TRANSLATION: <translated text>
 Categories: DIALOGUE (speech bubbles), NARRATION (caption boxes, inner monologue), SFX (sound effects, moans, gasps, wet sounds, impact sounds — ALL of them), SIGN (signs, labels, posters), TEXT (other).
 
 Translation rules:
-• Produce natural, fluent ${TARGET_LANG} that reads well in manga speech bubbles.
+• Produce smooth, natural ${TARGET_LANG} that reads like native dialogue (natural style).
 • Translate moans, sexual sounds, and onomatopoeia into natural ${TARGET_LANG} equivalents (e.g. あっ→Ahh, んっ→Nnh, ずぷ→*squelch*, パンパン→*slap slap*).
 • Preserve the tone and intensity of dialogue — crude language stays crude, soft language stays soft.
 • Translate dirty talk, pillow talk, and explicit dialogue faithfully without toning it down.
-• Keep honorifics (-san, -sama, -sensei, -chan, -kun, onii-chan, senpai, etc.) as-is unless a STYLE PROFILE says otherwise.
+• Drop or adapt honorifics (-san, -sama, -sensei, -chan, -kun, onii-chan, senpai, etc.) unless a STYLE PROFILE says to keep them.
 • For SIGN or TEXT that label an object (like a phone screen or a label tag), add the object context in English, e.g. "Phone screen: Dad" or "Sign: Chigusa Inn".
 
 The correct reading order is specified in the user message — follow it exactly. Do NOT guess a different order.
@@ -257,11 +261,11 @@ TRANSLATION: <translated text>
 Categories: DIALOGUE (speech bubbles), NARRATION (caption boxes, inner monologue), SFX (sound effects, moans, gasps, wet sounds, impact sounds — ALL of them), SIGN (signs, labels, posters), TEXT (other).
 
 Translation rules:
-• Produce natural, fluent ${TARGET_LANG} that reads well in manga speech bubbles.
+• Produce smooth, natural ${TARGET_LANG} that reads like native dialogue (natural style).
 • Translate moans, sexual sounds, and onomatopoeia into natural ${TARGET_LANG} equivalents.
 • Preserve tone and intensity — crude stays crude, soft stays soft.
 • Translate explicit dialogue faithfully without toning it down.
-• Keep honorifics (-san, -sama, -sensei, -chan, -kun, onii-chan, senpai, etc.) as-is unless a STYLE PROFILE says otherwise.
+• Drop or adapt honorifics (-san, -sama, -sensei, -chan, -kun, onii-chan, senpai, etc.) unless a STYLE PROFILE says to keep them.
 • For SIGN or TEXT that label an object (like a phone screen or a label tag), add the object context in English, e.g. "Phone screen: Dad" or "Sign: Chigusa Inn".
 
 The correct reading order is specified in the user message — follow it exactly. Do NOT guess a different order.
@@ -369,19 +373,20 @@ browser.runtime.onMessage.addListener((msg, sender) => {
           ? prev.fullB64
           : await imageToBase64Jpeg(msg.imageUrl, msg.pageUrl);
         const b64 = await cropAndEncode(msg.imageUrl, msg.crop, msg.pageUrl);
-      tabState[tabId] = {
-        b64,
-        fullB64,
-        imageUrl: msg.imageUrl,
-        analysis: isSameImage ? (prev?.analysis || "") : "",
-        analysisImageUrl: isSameImage ? prev?.analysisImageUrl || null : null,
-        analysisEnabled,
-        styleId,
-        lastTranslation: prev?.lastTranslation || "",
-        lastContextImageUrl: prev?.lastContextImageUrl || null,
-        ignoreSfx: prev?.ignoreSfx || false,
-        manualOrder: null
-      };
+        tabState[tabId] = {
+          b64,
+          fullB64,
+          imageUrl: msg.imageUrl,
+          analysis: isSameImage ? (prev?.analysis || "") : "",
+          analysisImageUrl: isSameImage ? prev?.analysisImageUrl || null : null,
+          analysisEnabled,
+          styleId,
+          lastTranslation: prev?.lastTranslation || "",
+          lastContextImageUrl: prev?.lastContextImageUrl || null,
+          ignoreSfx: prev?.ignoreSfx || false,
+          keepTranslationsOnNewImage: prev?.keepTranslationsOnNewImage || false,
+          manualOrder: null
+        };
         await streamTranslation(b64, tabId, false, fullB64);
       } catch (err) { tell(tabId, { action: "error", message: friendlyError(err) }); }
     })();
@@ -413,6 +418,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         analysisImageUrl: null,
         lastContextImageUrl: null,
         ignoreSfx: false,
+        keepTranslationsOnNewImage: false,
         manualOrder: null
       };
     }
@@ -435,6 +441,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         analysisImageUrl: null,
         lastContextImageUrl: null,
         ignoreSfx: false,
+        keepTranslationsOnNewImage: false,
         manualOrder: null
       };
     }
@@ -456,12 +463,36 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         analysisImageUrl: null,
         lastContextImageUrl: null,
         ignoreSfx,
+        keepTranslationsOnNewImage: false,
         manualOrder: null
       };
     } else {
       tabState[tabId].ignoreSfx = ignoreSfx;
     }
     return Promise.resolve({ ignoreSfx });
+  }
+
+  if (msg.action === "setKeepTranslationsOnNewImage") {
+    const keepTranslationsOnNewImage = !!msg.keepTranslationsOnNewImage;
+    if (!tabState[tabId]) {
+      tabState[tabId] = {
+        b64: null,
+        imageUrl: null,
+        analysis: "",
+        analysisEnabled: true,
+        styleId: DEFAULT_STYLE,
+        lastTranslation: "",
+        fullB64: null,
+        analysisImageUrl: null,
+        lastContextImageUrl: null,
+        ignoreSfx: false,
+        keepTranslationsOnNewImage,
+        manualOrder: null
+      };
+    } else {
+      tabState[tabId].keepTranslationsOnNewImage = keepTranslationsOnNewImage;
+    }
+    return Promise.resolve({ keepTranslationsOnNewImage });
   }
 
   if (msg.action === "setGlobalInstructions") {
@@ -483,6 +514,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         analysisImageUrl: null,
         lastContextImageUrl: null,
         ignoreSfx: false,
+        keepTranslationsOnNewImage: false,
         manualOrder: null
       };
     }
@@ -504,8 +536,29 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       globalInstructions,
       styleId: getStyleId(tabId),
       readingOrder: getReadingOrder(tabId),
-      ignoreSfx: getIgnoreSfx(tabId)
+      ignoreSfx: getIgnoreSfx(tabId),
+      keepTranslationsOnNewImage: getKeepTranslationsOnNewImage(tabId)
     });
+  }
+
+  if (msg.action === "reanalyze") {
+    const state = tabState[tabId];
+    if (!state?.fullB64 && !state?.b64) {
+      return Promise.resolve({ ok: false });
+    }
+    (async () => {
+      try {
+        const analysis = await analyseScene(state.fullB64 || state.b64, tabId);
+        if (tabState[tabId]) {
+          tabState[tabId].analysis = analysis;
+          tabState[tabId].analysisImageUrl = state.imageUrl || null;
+        }
+        tell(tabId, { action: "analysis", text: analysis });
+      } catch {
+        tell(tabId, { action: "analysis", text: "" });
+      }
+    })();
+    return;
   }
 
   if (msg.action === "chat") {
