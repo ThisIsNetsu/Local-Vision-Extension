@@ -4,6 +4,7 @@
   "version": "3.1.0",
   "description": "Translate text in images using a local Qwen3-VL model via llama.cpp",
   "permissions": [
+    "storage",
     "contextMenus",
     "activeTab",
     "webRequest",
