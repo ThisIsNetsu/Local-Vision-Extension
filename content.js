@@ -762,7 +762,7 @@
     closeOverlay();
     injectCSS();
     isStreaming = true;
-    analysisOpen = false;
+    analysisOpen = true;
     currentAnalysis = "";
     currentImageUrl = imageUrl;
     const isNewImage = imageUrl && imageUrl !== lastOverlayImageUrl;
@@ -1595,14 +1595,16 @@
   }
 
   function buildAnalysisHTML() {
-    if (!analysisEnabled || !currentAnalysis) return "";
+    const analysisText = currentAnalysis
+      ? esc(currentAnalysis)
+      : (analysisEnabled ? "Analyzing image…" : "Image analysis is turned off.");
     return '<div class="vtl-analysis">' +
       '<div class="vtl-analysis-hdr" data-vtl-toggle>' +
         '<span class="vtl-analysis-arrow' + (analysisOpen ? " open" : "") + '">▶</span>' +
         ' Image Analysis' +
       '</div>' +
       '<div class="vtl-analysis-body" style="display:' + (analysisOpen ? "block" : "none") + '">' +
-        esc(currentAnalysis) +
+        analysisText +
       '</div></div>';
   }
 

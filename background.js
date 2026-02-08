@@ -135,6 +135,14 @@ function getAnalysisEnabled(tid) {
   return tabState[tid]?.analysisEnabled ?? true;
 }
 
+async function captureVisibleTabJpeg() {
+  try {
+    return await browser.tabs.captureVisibleTab(null, { format: "jpeg", quality: 95 });
+  } catch {
+    return null;
+  }
+}
+
 // =================== Filter translation output to only context-relevant content ===================
 function filterForContext(translationText, analysis) {
   const lines = translationText.split("\n");
@@ -645,6 +653,11 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       const hCount = getHist(tabId).length;
       const analysisEnabled = getAnalysisEnabled(tabId);
       const styleId = getStyleId(tabId);
+      const prev = tabState[tabId];
+      const isSameImage = prev?.imageUrl === msg.imageUrl;
+      const analysisB64 = isSameImage && prev?.fullB64
+        ? prev.fullB64
+        : await captureVisibleTabJpeg();
       try {
         const ignoreSfx = getIgnoreSfx(tabId);
         await tell(tabId, { action: "showOverlay", imageUrl: msg.imageUrl, historyCount: hCount, analysisEnabled, styleId, ignoreSfx });
@@ -654,11 +667,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         await tell(tabId, { action: "showOverlay", imageUrl: msg.imageUrl, historyCount: hCount, analysisEnabled, styleId, ignoreSfx });
       }
       try {
-        const prev = tabState[tabId];
-        const isSameImage = prev?.imageUrl === msg.imageUrl;
-        const fullB64 = isSameImage && prev?.fullB64
-          ? prev.fullB64
-          : await imageToBase64Jpeg(msg.imageUrl, msg.pageUrl);
+        const fullB64 = analysisB64;
         const b64 = await cropAndEncode(msg.imageUrl, msg.crop, msg.pageUrl);
         tabState[tabId] = {
           b64,
@@ -686,7 +695,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     if (!state) { tell(tabId, { action: "error", message: "No previous translation to retry." }); return; }
     state.manualOrder = msg.manualOrder || null;
     (async () => {
-      try { await streamTranslation(state.b64, tabId, true, state.fullB64 || state.b64); }
+      try { await streamTranslation(state.b64, tabId, true, state.fullB64); }
       catch (err) { tell(tabId, { action: "error", message: friendlyError(err) }); }
     })();
     return;
@@ -783,12 +792,12 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 
   if (msg.action === "reanalyze") {
     const state = tabState[tabId];
-    if (!state?.fullB64 && !state?.b64) {
+    if (!state?.fullB64) {
       return Promise.resolve({ ok: false });
     }
     (async () => {
       try {
-        const analysis = await analyseScene(state.fullB64 || state.b64, tabId);
+        const analysis = await analyseScene(state.fullB64, tabId);
         if (tabState[tabId]) {
           tabState[tabId].analysis = analysis;
           tabState[tabId].analysisImageUrl = state.imageUrl || null;
@@ -1188,9 +1197,9 @@ async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
   const state = tabState[tabId];
   const currentImageUrl = state?.imageUrl || null;
   const analysisImageUrl = state?.analysisImageUrl || null;
-  const analysisSource = analysisBase64Url || base64Url;
+  const analysisSource = analysisBase64Url || state?.fullB64 || null;
 
-  if (analysisEnabled) {
+  if (analysisEnabled && analysisSource) {
     if ((isRetry && state?.analysis) || (analysisImageUrl && analysisImageUrl === currentImageUrl && state?.analysis)) {
       analysis = state.analysis;
       tell(tabId, { action: "analysis", text: analysis });
