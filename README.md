@@ -1,49 +1,56 @@
 # VisionTranslate (Local Vision Extension)
 
-VisionTranslate is a Manifest V2 browser extension that translates text inside images (manga/manhwa/manhua pages) using a local **llama.cpp** server and a vision-language model (e.g., Qwen3-VL). The extension adds a right-click context menu action to translate a selected region, then renders a translation overlay with tools for retranslation, notes, and context continuity.
+VisionTranslate is a Firefox extension that translates text found inside images (such as manga, manhwa, and manhua pages) by sending a selected image region to a local `llama.cpp` vision model server. It adds a context-menu option to select a region, renders an overlay with translations, and includes tools to refine and re-run translations without leaving the page.
 
-# Please note that this is currently in ALPHA and is recieving changes quite often, sometimes breaking functionality as I figure out how to do this.
+> Status: Alpha. The project is under active development and behavior may change between updates.
 
-## Key Features
+## What it does
 
-- **Image translation overlay** with categorized output (Dialogue, Narration, SFX, Sign, Text) and streaming updates.
-- **Two-stage pipeline**: scene analysis → translation to improve reading order and consistency.
-- **Region selection**: draw a rectangle over part of an image to translate just that area.
-- **Context memory**: per-tab history for the last few pages and a compact story registry to keep character names consistent.
+- Captures a user-selected region of an image and submits it to a local vision-capable model server.
+- Runs a two-stage pipeline (scene analysis → translation) to improve reading order and consistency.
+- Displays results in an on-page overlay with per-line controls, quality checks, and context memory.
+
+## Features
+
+- **Region selection**: draw a rectangle over any image area to translate only that portion.
+- **Translation overlay**: categorized output (Dialogue, Narration, SFX, Sign, Text) with streaming updates.
 - **Retranslation tools**:
-  - Right-click any translated line for Standard / Literal / Natural retranslation.
-  - Add per-line notes that auto-trigger retranslation with the note applied.
-- **Global instructions** (apply across all tabs until restart).
-- **Quality check** pass that flags low-confidence entries in the UI.
-- **Text-only chat** to ask questions or provide context to the model.
+  - Right-click a line for Standard / Literal / Natural retranslation.
+  - Add per-line notes that automatically trigger retranslation.
+- **Context memory**: per-tab history and a compact story registry to keep names consistent.
+- **Global instructions**: apply style/constraints across all tabs until restart.
+- **Quality check**: highlights low-confidence entries in the UI.
+- **Text-only chat**: ask questions or provide additional context to the model.
 
 ## Requirements
 
-- **Browser**: Firefox (Manifest V2 + `browser.*` API). Chromium-based browsers may require a polyfill and MV3 migration.
-- **Local model server**: `llama.cpp` running at `http://127.0.0.1:8033` with a vision-capable model (the extension is written for Qwen3-VL style prompts).
+- **Browser**: Firefox (Manifest V2 with `browser.*` APIs).
+  - Chromium-based browsers will require MV3 migration and a polyfill.
+- **Local model server**: `llama.cpp` running on `http://127.0.0.1:8033` with a vision-capable model (the prompts are optimized for Qwen3-VL style models).
 
 ### llama.cpp server expectations
-The extension sends OpenAI-style `/v1/chat/completions` requests with `image_url` content. Ensure your server:
+
+The extension sends OpenAI-style `/v1/chat/completions` requests that include `image_url` content. Ensure your server:
 
 - Accepts `image_url` messages for vision input.
 - Supports streaming (`stream: true`).
-- Exposes the endpoint at `http://127.0.0.1:8033`.
+- Exposes the endpoint at `http://127.0.0.1:8033` (or update the configuration).
 
-## Installation (Development)
+## Quick start (development)
 
-1. Clone or copy this repo to your machine.
+1. Clone or copy this repository.
 2. In Firefox, open `about:debugging#/runtime/this-firefox`.
 3. Click **Load Temporary Add-on...**
 4. Select the `manifest.json` file in this repo.
 
 ## Usage
 
-1. **Navigate** to a page with an image (e.g., a manga page).
-2. **Right-click the image** and choose:
-   - **🔍 Select & Translate Region** (draw a rectangle)
-3. The overlay will open and start translating.
+1. Navigate to a page containing an image.
+2. Right-click the image and choose **🔍 Select & Translate Region**.
+3. Draw a rectangle around the text you want translated.
+4. Review the translation in the overlay and adjust as needed.
 
-### Overlay Controls
+### Overlay controls
 
 - **Analysis toggle**: enable/disable scene analysis.
 - **Retry**: re-run translation if text was missed.
@@ -51,25 +58,21 @@ The extension sends OpenAI-style `/v1/chat/completions` requests with `image_url
 - **Global instructions**: apply instructions across all tabs until restart.
 - **Context badge**: view stored page context and history.
 
-### Per-line Actions
+### Per-line actions
 
-- **Right-click a translated line** for Standard / Literal / Natural retranslation.
-- **Line note**: type a note on a line to auto-retranslate with the note applied.
-
-### Region Translate
-
-Choose **Select & Translate Region**, then drag a rectangle over the area you want translated. The crop is applied relative to the source image so the model only sees the selected region.
+- Right-click a translated line for Standard / Literal / Natural retranslation.
+- Add a note to a line to auto-retranslate with the note applied.
 
 ## Configuration
 
-Important configuration values are at the top of `background.js`:
+Key settings live near the top of `background.js`:
 
 - `LLAMA_SERVER`: server URL (default `http://127.0.0.1:8033`).
 - `TARGET_LANG`: output language (default `English`).
-- `MAX_TOKENS`, `TEMPERATURE`, penalties: tuning for the model.
+- `MAX_TOKENS`, `TEMPERATURE`, penalties: model tuning values.
 - `IMG_MAX_DIM`: max size for image preprocessing.
 
-You can also adjust prompt text and style profiles inside `background.js`.
+You can also edit prompt text and style profiles inside `background.js`.
 
 ## Permissions
 
@@ -81,20 +84,20 @@ The extension requests:
 
 ## Limitations
 
-- **Manifest V2** is deprecated in Chromium. Firefox still supports MV2.
-- The extension assumes a local llama.cpp server is running with a vision model.
-- Image sites that block cross-origin image fetching may still fail, even with Referer injection.
+- Manifest V2 is deprecated in Chromium; Firefox still supports it.
+- The extension assumes a local `llama.cpp` server is running with a vision model.
+- Some sites block cross-origin image fetching; translations may fail if the image is not accessible.
 
 ## Troubleshooting
 
-- **“Cannot reach llama.cpp”**: Start your server and ensure it listens on `127.0.0.1:8033`.
-- **Blank or no translation**: Use **Retry** or check the server logs for model errors.
-- **Region translate does nothing**: ensure the page image is accessible and not blocked by CSP/hotlinking.
+- **Cannot reach llama.cpp**: Start your server and confirm it listens on `127.0.0.1:8033`.
+- **Blank or missing translations**: Use **Retry** or check server logs for model errors.
+- **Region translate does nothing**: Confirm the image is accessible and not blocked by CSP/hotlinking.
 
-## Project Structure
+## Project structure
 
 - `manifest.json` – extension manifest and permissions.
-- `background.js` – translation pipeline, llama.cpp API calls, context/history, QA, and chat.
+- `background.js` – translation pipeline, API calls, context/history, QA, and chat.
 - `content.js` – overlay UI, region selection, per-line tools, and rendering.
 
 ## License
