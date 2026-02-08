@@ -114,7 +114,7 @@ function getKeepTranslationsOnNewImage(tid) {
 
 // =================== Page history for translation continuity ===================
 const pageHistory = {};
-const MAX_HISTORY  = 3;
+const MAX_HISTORY = 10;
 
 function getHist(tid)  { return pageHistory[tid] || []; }
 function pushHist(tid, text) {
@@ -285,21 +285,31 @@ function buildLatestInfoBlock(tabId, analysis, filteredTranslation, noteOverride
   return parts.join("\n\n").trim();
 }
 
-async function reviseHistoryEntry(tabId, entry, latestInfo) {
+async function requestRetroactiveEditPlan(tabId, history, latestInfo) {
   const registry = getRegistry(tabId);
   const notes = formatUserNotes(tabId);
   const sys =
-`You update stored context entries when new information arrives.
-Correct names, genders, relationships, or wording inconsistencies.
-Preserve the original structure and keep the same lines/categories.
-If nothing needs changing, output the entry exactly as-is.
-Output ONLY the updated entry.`;
+`You are updating stored context entries with minimal edits.
+Return ONLY strict JSON with this schema:
+{ "edits": [ { "pageIndex": number, "replacements": [ { "find": string, "replace": string } ] } ] }
+
+Rules:
+- pageIndex is 0-based, matching the provided entries (oldest to newest).
+- Use ONLY small replacements; do NOT rewrite or add new lines.
+- Do NOT include full history, registries, or new labels.
+- Every "find" must be an exact substring from the target entry.
+- If no changes are needed, return {"edits": []}.
+Return JSON only.`;
+
+  const entryList = history.map((entry, index) =>
+    `[#${index}]\n${entry}`
+  ).join("\n\n---\n\n");
 
   const userParts = [];
   if (registry) userParts.push("STORY REGISTRY:\n" + registry);
   if (notes) userParts.push("USER NOTES:\n" + notes);
-  if (latestInfo) userParts.push("NEW INFO SOURCES:\n" + latestInfo);
-  userParts.push("ORIGINAL ENTRY:\n" + entry);
+  if (latestInfo) userParts.push("NEW INFO:\n" + latestInfo);
+  userParts.push("STORED CONTEXT ENTRIES (oldest to newest):\n" + entryList);
 
   const res = await fetch(settings.LLAMA_SERVER + "/v1/chat/completions", {
     method: "POST",
@@ -310,31 +320,114 @@ Output ONLY the updated entry.`;
         { role: "user", content: userParts.join("\n\n") },
       ],
       temperature: 0.2,
-      max_tokens: 400,
+      max_tokens: 500,
       stream: false
     })
   });
-  if (!res.ok) return entry;
+  if (!res.ok) return null;
   const data = await res.json();
   let out = data.choices?.[0]?.message?.content?.trim() || "";
   out = cleanOutput(out);
-  return out || entry;
+  try {
+    const parsed = JSON.parse(out);
+    if (!parsed || !Array.isArray(parsed.edits)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function applyReplacementsToEntry(entry, replacements) {
+  let updated = entry;
+  for (const rep of replacements) {
+    if (!rep || typeof rep.find !== "string" || typeof rep.replace !== "string") continue;
+    const find = rep.find.trim();
+    if (!find) continue;
+    if (find.length > entry.length * 0.6) continue;
+    if (!updated.includes(find)) continue;
+    updated = updated.split(find).join(rep.replace);
+  }
+  return updated;
+}
+
+function applyRetroactiveEditPlan(history, plan) {
+  const updated = history.slice();
+  for (const edit of plan.edits) {
+    const pageIndex = Number(edit?.pageIndex);
+    if (!Number.isFinite(pageIndex)) continue;
+    if (!Array.isArray(edit.replacements)) continue;
+    if (updated[pageIndex] == null) continue;
+    updated[pageIndex] = applyReplacementsToEntry(updated[pageIndex], edit.replacements);
+  }
+  return updated;
 }
 
 async function retroactivelyUpdateHistory(tabId, latestInfo) {
   if (!settings.RETROACTIVE_CONTEXT) return;
   const hist = getHist(tabId);
   if (!hist.length || !latestInfo) return;
-  const updated = [];
-  for (const entry of hist) {
-    try {
-      const revised = await reviseHistoryEntry(tabId, entry, latestInfo);
-      updated.push(revised || entry);
-    } catch {
-      updated.push(entry);
-    }
+  const plan = await requestRetroactiveEditPlan(tabId, hist, latestInfo);
+  if (!plan) return;
+  const updated = applyRetroactiveEditPlan(hist, plan);
+  const originalTotal = hist.join("\n\n").length;
+  const updatedTotal = updated.join("\n\n").length;
+  if (updatedTotal > originalTotal * 1.5) return;
+  for (let i = 0; i < hist.length; i++) {
+    if (!isHistoryEntrySane(hist[i], updated[i])) return;
   }
   pageHistory[tabId] = updated;
+}
+
+async function compactHistoryEntry(tabId, entry) {
+  const registry = getRegistry(tabId);
+  const notes = formatUserNotes(tabId);
+  const sys =
+`You compact a stored context entry to keep only what helps translation continuity.
+Keep short scene gist + essential dialogue/narration cues.
+Remove filler, repetitions, and irrelevant details.
+Do NOT add new labels or include other pages.
+Output ONLY the compacted entry.`;
+
+  const userParts = [];
+  if (registry) userParts.push("STORY REGISTRY:\n" + registry);
+  if (notes) userParts.push("USER NOTES:\n" + notes);
+  userParts.push("ORIGINAL ENTRY:\n" + entry);
+  userParts.push("Return only the compacted entry (shorter than original):");
+
+  const res = await fetch(settings.LLAMA_SERVER + "/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: userParts.join("\n\n") },
+      ],
+      temperature: 0.2,
+      max_tokens: 200,
+      stream: false
+    })
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  let out = data.choices?.[0]?.message?.content?.trim() || "";
+  out = cleanOutput(out);
+  if (!out) return null;
+  if (out.length > entry.length * 1.05) return null;
+  if (!isHistoryEntrySane(entry, out, { maxGrowthRatio: 1.1, maxGrowthAbs: 80 })) return null;
+  return out;
+}
+
+async function compactLatestHistoryEntry(tabId) {
+  const hist = getHist(tabId);
+  if (!hist.length) return;
+  const lastIndex = hist.length - 1;
+  const entry = hist[lastIndex];
+  try {
+    const compacted = await compactHistoryEntry(tabId, entry);
+    if (compacted && compacted !== entry) {
+      pageHistory[tabId][lastIndex] = compacted;
+    }
+  } catch {}
 }
 
 function queueRetroactiveUpdate(tabId, latestInfo) {
@@ -986,6 +1079,51 @@ function dedupeOutput(text) {
   return unique.join("\n\n");
 }
 
+const HISTORY_MARKER_PATTERNS = [
+  /NEW INFO/i,
+  /STORY REGISTRY/i,
+  /ORIGINAL ENTRY/i,
+  /NEW INFO SOURCES/i,
+  /ORIGINAL ENTRY:/i,
+  /===\s*PREVIOUS PAGE\s*===/i,
+];
+
+function hasDisallowedMarkers(text) {
+  return HISTORY_MARKER_PATTERNS.some(re => re.test(text));
+}
+
+function hasRepeatedBlocks(text) {
+  const blocks = text.split(/\n\n+/).map(b => b.trim()).filter(Boolean);
+  const seen = new Set();
+  for (const block of blocks) {
+    if (seen.has(block)) return true;
+    seen.add(block);
+  }
+  return false;
+}
+
+function hasExcessiveLineRepeats(text, threshold = 3) {
+  const counts = new Map();
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    const count = (counts.get(line) || 0) + 1;
+    if (count >= threshold && line.length > 6) return true;
+    counts.set(line, count);
+  }
+  return false;
+}
+
+function isHistoryEntrySane(original, updated, { maxGrowthRatio = 1.6, maxGrowthAbs = 400 } = {}) {
+  if (!updated || typeof updated !== "string") return false;
+  if (hasDisallowedMarkers(updated)) return false;
+  if (hasRepeatedBlocks(updated)) return false;
+  if (hasExcessiveLineRepeats(updated)) return false;
+  const growth = updated.length - original.length;
+  if (growth > maxGrowthAbs) return false;
+  if (updated.length > Math.max(20, original.length) * maxGrowthRatio) return false;
+  return true;
+}
+
 // =================== BUILD HISTORY CONTEXT FOR PROMPT ===================
 function detectReadingOrder(analysisText) {
   if (!analysisText) return null;
@@ -1187,6 +1325,9 @@ async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
   const histEntry = filterForContext(final, analysis);
   const isNewContextImage = state?.lastContextImageUrl !== currentImageUrl;
   let didUpdateContext = false;
+  if (!isRetry && isNewContextImage && getHist(tabId).length) {
+    await compactLatestHistoryEntry(tabId);
+  }
   if (isRetry) {
     if (state?.lastContextImageUrl === currentImageUrl) {
       replaceLastHist(tabId, histEntry);

@@ -1700,6 +1700,13 @@
     panelBody.querySelectorAll(".vtl-note").forEach(note => {
       const key = note.dataset.key || "";
       note.value = noteMap.get(key) || "";
+      note.addEventListener("keydown", e => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          note.blur();
+        }
+      });
       note.addEventListener("input", () => {
         if (isStreaming) return;
         const val = note.value.trim();
