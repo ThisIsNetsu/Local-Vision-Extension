@@ -61,7 +61,7 @@ function getReadingOrder(tid) {
 }
 
 function getKeepTranslationsOnNewImage(tid) {
-  return tabState[tid]?.keepTranslationsOnNewImage ?? false;
+  return tabState[tid]?.keepTranslationsOnNewImage ?? true;
 }
 
 // =================== Page history for translation continuity ===================
@@ -130,8 +130,53 @@ const storyRegistry = {};
 function getRegistry(tid)      { return storyRegistry[tid] || ""; }
 function setRegistry(tid, val) { storyRegistry[tid] = val; }
 
-async function updateStoryRegistry(tabId, analysis, filteredTranslation) {
+function ensureTabState(tabId) {
+  if (tabId == null) return;
+  if (!tabState[tabId]) {
+    tabState[tabId] = {
+      b64: null,
+      imageUrl: null,
+      analysis: "",
+      analysisEnabled: true,
+      styleId: DEFAULT_STYLE,
+      lastTranslation: "",
+      fullB64: null,
+      analysisImageUrl: null,
+      lastContextImageUrl: null,
+      ignoreSfx: false,
+      keepTranslationsOnNewImage: true,
+      manualOrder: null,
+      userNotes: []
+    };
+  }
+}
+
+function getUserNotes(tabId) {
+  return tabState[tabId]?.userNotes || [];
+}
+
+function formatUserNotes(tabId) {
+  const notes = getUserNotes(tabId);
+  if (!notes.length) return "";
+  return notes.map(n => `- (${n.source}) ${n.text}`).join("\n");
+}
+
+function addUserNote(tabId, text, source = "Note") {
+  if (tabId == null) return;
+  const cleaned = (text || "").trim();
+  if (!cleaned) return;
+  ensureTabState(tabId);
+  const notes = tabState[tabId].userNotes || [];
+  const entry = { text: cleaned, source, ts: Date.now() };
+  const key = `${entry.source}|${entry.text}`;
+  const seen = new Set(notes.map(n => `${n.source}|${n.text}`));
+  if (!seen.has(key)) notes.push(entry);
+  tabState[tabId].userNotes = notes.slice(-20);
+}
+
+async function updateStoryRegistry(tabId, analysis, filteredTranslation, userNotes) {
   const current = getRegistry(tabId);
+  const noteBlock = userNotes ? "USER NOTES:\n" + userNotes + "\n\n" : "";
 
   const prompt = [
     "You maintain a compact story registry for a manga being translated page-by-page.",
@@ -150,6 +195,7 @@ async function updateStoryRegistry(tabId, analysis, filteredTranslation) {
     current || "(empty – first page)",
     "",
     "LATEST PAGE:",
+    noteBlock.trim(),
     analysis ? "Scene: " + analysis : "",
     filteredTranslation,
     "",
@@ -197,6 +243,7 @@ browser.webRequest.onBeforeSendHeaders.addListener(
 // =================== SYSTEM PROMPTS — Scene analysis (stage 1) ===================
 const SYS_ANALYSE =
 `You are an expert manga/manhwa/manhua page analyst. Examine the image and write a brief scene analysis (2-4 sentences).
+Use mature, adult, and visceral language appropriate for explicit 18+ manga. Be candid about erotic or sexual details when present.
 
 Cover: what is happening in the scene, who appears to be speaking (if dialogue is visible), and the emotional tone or mood.
 
@@ -384,8 +431,9 @@ browser.runtime.onMessage.addListener((msg, sender) => {
           lastTranslation: prev?.lastTranslation || "",
           lastContextImageUrl: prev?.lastContextImageUrl || null,
           ignoreSfx: prev?.ignoreSfx || false,
-          keepTranslationsOnNewImage: prev?.keepTranslationsOnNewImage || false,
-          manualOrder: null
+          keepTranslationsOnNewImage: prev?.keepTranslationsOnNewImage ?? true,
+          manualOrder: null,
+          userNotes: prev?.userNotes || []
         };
         await streamTranslation(b64, tabId, false, fullB64);
       } catch (err) { tell(tabId, { action: "error", message: friendlyError(err) }); }
@@ -407,20 +455,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg.action === "setAnalysisEnabled") {
     const enabled = !!msg.enabled;
     if (!tabState[tabId]) {
-      tabState[tabId] = {
-        b64: null,
-        imageUrl: null,
-        analysis: "",
-        analysisEnabled: enabled,
-        styleId: DEFAULT_STYLE,
-        lastTranslation: "",
-        fullB64: null,
-        analysisImageUrl: null,
-        lastContextImageUrl: null,
-        ignoreSfx: false,
-        keepTranslationsOnNewImage: false,
-        manualOrder: null
-      };
+      ensureTabState(tabId);
     }
     tabState[tabId].analysisEnabled = enabled;
     if (!enabled) tabState[tabId].analysis = "";
@@ -430,20 +465,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg.action === "setStyle") {
     const styleId = STYLE_PROFILES[msg.styleId] ? msg.styleId : DEFAULT_STYLE;
     if (!tabState[tabId]) {
-      tabState[tabId] = {
-        b64: null,
-        imageUrl: null,
-        analysis: "",
-        analysisEnabled: true,
-        styleId,
-        lastTranslation: "",
-        fullB64: null,
-        analysisImageUrl: null,
-        lastContextImageUrl: null,
-        ignoreSfx: false,
-        keepTranslationsOnNewImage: false,
-        manualOrder: null
-      };
+      ensureTabState(tabId);
     }
     tabState[tabId].styleId = styleId;
     return Promise.resolve({ styleId });
@@ -452,20 +474,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg.action === "setIgnoreSfx") {
     const ignoreSfx = !!msg.ignoreSfx;
     if (!tabState[tabId]) {
-      tabState[tabId] = {
-        b64: null,
-        imageUrl: null,
-        analysis: "",
-        analysisEnabled: true,
-        styleId: DEFAULT_STYLE,
-        lastTranslation: "",
-        fullB64: null,
-        analysisImageUrl: null,
-        lastContextImageUrl: null,
-        ignoreSfx,
-        keepTranslationsOnNewImage: false,
-        manualOrder: null
-      };
+      ensureTabState(tabId);
+      tabState[tabId].ignoreSfx = ignoreSfx;
     } else {
       tabState[tabId].ignoreSfx = ignoreSfx;
     }
@@ -475,20 +485,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg.action === "setKeepTranslationsOnNewImage") {
     const keepTranslationsOnNewImage = !!msg.keepTranslationsOnNewImage;
     if (!tabState[tabId]) {
-      tabState[tabId] = {
-        b64: null,
-        imageUrl: null,
-        analysis: "",
-        analysisEnabled: true,
-        styleId: DEFAULT_STYLE,
-        lastTranslation: "",
-        fullB64: null,
-        analysisImageUrl: null,
-        lastContextImageUrl: null,
-        ignoreSfx: false,
-        keepTranslationsOnNewImage,
-        manualOrder: null
-      };
+      ensureTabState(tabId);
     } else {
       tabState[tabId].keepTranslationsOnNewImage = keepTranslationsOnNewImage;
     }
@@ -503,20 +500,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg.action === "setReadingOrder") {
     const order = msg.readingOrder || {};
     if (!tabState[tabId]) {
-      tabState[tabId] = {
-        b64: null,
-        imageUrl: null,
-        analysis: "",
-        analysisEnabled: true,
-        styleId: DEFAULT_STYLE,
-        lastTranslation: "",
-        fullB64: null,
-        analysisImageUrl: null,
-        lastContextImageUrl: null,
-        ignoreSfx: false,
-        keepTranslationsOnNewImage: false,
-        manualOrder: null
-      };
+      ensureTabState(tabId);
     }
     tabState[tabId].readingOrder = {
       auto: order.auto !== false,
@@ -568,6 +552,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg.action === "clearContext") {
     clearHist(tabId);
     delete storyRegistry[tabId];
+    if (tabState[tabId]) tabState[tabId].userNotes = [];
     return Promise.resolve({ historyCount: 0 });
   }
 
@@ -576,6 +561,15 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   }
   if (msg.action === "getHistory") {
     return Promise.resolve({ history: getHist(tabId) });
+  }
+
+  if (msg.action === "addUserNote") {
+    addUserNote(tabId, msg.text, msg.source);
+    if (tabId != null && tabState[tabId]) {
+      const filtered = filterForContext(tabState[tabId].lastTranslation || "", tabState[tabId].analysis || "");
+      updateStoryRegistry(tabId, tabState[tabId].analysis || "", filtered, formatUserNotes(tabId));
+    }
+    return Promise.resolve({ ok: true });
   }
 });
 
@@ -712,8 +706,11 @@ Should this become a global instruction?`;
 // =================== SCENE ANALYSIS (stage 1 — non-streaming) ===================
 async function analyseScene(base64Url, tabId) {
   const registry = tabId ? getRegistry(tabId) : "";
+  const notes = tabId ? formatUserNotes(tabId) : "";
   const userText = registry
-    ? "Previously established context:\n" + registry + "\n\nNow briefly analyse this manga/manhwa page. /no_think"
+    ? "Previously established context:\n" + registry + "\n\n"
+        + (notes ? "User notes:\n" + notes + "\n\n" : "")
+        + "Now briefly analyse this manga/manhwa page. /no_think"
     : USER_ANALYSE;
 
   const res = await fetch(LLAMA_SERVER + "/v1/chat/completions", {
@@ -837,10 +834,14 @@ function buildHistoryPrefix(tabId) {
   const registry = getRegistry(tabId);
   const hist = getHist(tabId);
   const lastPage = hist.length ? hist[hist.length - 1] : "";
+  const notes = formatUserNotes(tabId);
 
   let prefix = "";
   if (registry) {
     prefix += "=== STORY REGISTRY ===\n" + registry + "\n\n";
+  }
+  if (notes) {
+    prefix += "=== USER NOTES ===\n" + notes + "\n\n";
   }
   if (lastPage) {
     prefix += "=== PREVIOUS PAGE ===\n" + lastPage + "\n\n";
@@ -1027,7 +1028,7 @@ async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
 
   // —— Update story registry in background ——
   if (didUpdateContext) {
-    updateStoryRegistry(tabId, analysis, histEntry);
+    updateStoryRegistry(tabId, analysis, histEntry, formatUserNotes(tabId));
   }
 
   // —— Quality check (async) ——
@@ -1119,10 +1120,12 @@ async function handleChat(text, tabId) {
   const hist = getHist(tabId);
   const lastPage = hist.length ? hist[hist.length - 1] : "";
   const lastTranslation = tabState[tabId]?.lastTranslation || "";
+  const notes = formatUserNotes(tabId);
 
   const parts = [];
   if (globalInstructions) parts.push("GLOBAL INSTRUCTIONS:\n" + globalInstructions);
   if (registry) parts.push("STORY REGISTRY:\n" + registry);
+  if (notes) parts.push("USER NOTES:\n" + notes);
   if (lastPage) parts.push("PREVIOUS PAGE:\n" + lastPage);
   if (lastTranslation) parts.push("LAST TRANSLATION (raw):\n" + lastTranslation);
 

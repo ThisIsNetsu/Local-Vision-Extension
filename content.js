@@ -590,7 +590,7 @@
   let lastIncomingText = "";
   let appendHistoryText = "";
   let appendTranslations = true;
-  let keepTranslationsOnNewImage = false;
+  let keepTranslationsOnNewImage = true;
   let appendWarnMap = {};
   let appendBaseCount = 0;
   let appendSegments = [];
@@ -1057,6 +1057,7 @@
       cbody.scrollTop = cbody.scrollHeight;
 
       try {
+        browser.runtime.sendMessage({ action: "addUserNote", text, source: "Chat" }).catch(() => {});
         const r = await browser.runtime.sendMessage({ action: "chat", text });
         am.textContent = r?.reply || "(no reply)";
       } catch {
@@ -1437,6 +1438,13 @@
               styleId: styleSelect?.value || "explicit"
             });
             transEl.textContent = r.translation || "(empty)";
+            if (val) {
+              browser.runtime.sendMessage({
+                action: "addUserNote",
+                text: val,
+                source: "Line note"
+              }).catch(() => {});
+            }
           } catch {
             transEl.textContent = current;
           }
