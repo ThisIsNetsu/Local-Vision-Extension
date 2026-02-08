@@ -180,6 +180,13 @@
       display:inline-flex;align-items:center;gap:6px;cursor:pointer;
     }
     .vtl-order input { accent-color:#e94560; }
+    .vtl-order label.vtl-order-important {
+      padding:6px 10px;border-radius:999px;
+      background:rgba(233,69,96,.18);
+      border:1px solid rgba(233,69,96,.55);
+      color:#e6edf3;font-weight:600;
+      box-shadow:0 0 0 1px rgba(233,69,96,.2) inset;
+    }
     .vtl-order-group {
       display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;
       padding:6px 10px;border-radius:8px;
@@ -588,6 +595,7 @@
   let appendBaseCount = 0;
   let appendSegments = [];
   let globalBox = null, globalStatus = null, globalTextarea = null;
+  let globalSaveTimer = null, lastGlobalValue = "";
   let orderAuto = null, orderRtl = null, orderTtb = null;
   let ignoreSfxToggle = null;
   let appendToggle = null;
@@ -662,6 +670,7 @@
       const resp = await browser.runtime.sendMessage({ action: "getGlobals" });
       if (resp?.globalInstructions != null && globalTextarea) {
         globalTextarea.value = resp.globalInstructions;
+        lastGlobalValue = resp.globalInstructions;
       }
       if (resp?.styleId && styleSelect) {
         styleSelect.value = resp.styleId;
@@ -788,7 +797,7 @@
       } catch {}
     };
     const clearTranslationsBtn = Object.assign(document.createElement("button"),
-      { className: "vtl-btn vtl-btn-clear", textContent: "🧹 Clear Translations", title: "Clear the current translation list" });
+      { className: "vtl-btn vtl-btn-clear", textContent: "⬇️ 🧹 Clear Translations", title: "Clear the current translation list" });
     clearTranslationsBtn.onclick = () => {
       clearTranslations();
     };
@@ -886,24 +895,43 @@
     keepTranslationsToggle = document.createElement("input");
     keepTranslationsToggle.type = "checkbox";
     keepTranslationsToggle.checked = keepTranslationsOnNewImage;
-    keepLabel.append(keepTranslationsToggle, document.createTextNode("Keep translations on new images"));
+    keepLabel.className = "vtl-order-important";
+    keepLabel.append(
+      keepTranslationsToggle,
+      document.createTextNode("Keep current translations when translating a new image")
+    );
     orderRow.append(orderGroup, ignoreSfxLabel, appendLabel, keepLabel);
     const gActions = document.createElement("div");
     gActions.className = "vtl-global-actions";
-    const gApply = Object.assign(document.createElement("button"), { className: "vtl-btn", textContent: "Apply", title: "Save global instructions" });
-    const gRetry = Object.assign(document.createElement("button"), { className: "vtl-btn", textContent: "Retranslate Page", title: "Retranslate using the current settings" });
-    const gClear = Object.assign(document.createElement("button"), { className: "vtl-btn vtl-btn-clear", textContent: "Clear", title: "Clear global instructions" });
+    const gClear = Object.assign(document.createElement("button"), {
+      className: "vtl-btn vtl-btn-clear",
+      textContent: "Clear global instructions",
+      title: "Clear global instructions"
+    });
     globalStatus = document.createElement("span");
     globalStatus.className = "vtl-global-status";
     globalStatus.textContent = "";
 
-    gApply.onclick = async () => {
+    async function saveGlobalInstructions(text) {
+      if (text === lastGlobalValue) return;
       try {
-        await browser.runtime.sendMessage({ action: "setGlobalInstructions", text: globalTextarea.value });
-        globalStatus.textContent = "Saved";
+        await browser.runtime.sendMessage({ action: "setGlobalInstructions", text });
+        lastGlobalValue = text;
+        globalStatus.textContent = "Applied";
         setTimeout(() => { if (globalStatus) globalStatus.textContent = ""; }, 1200);
       } catch {}
-    };
+    }
+
+    function scheduleGlobalSave() {
+      if (!globalTextarea) return;
+      if (globalSaveTimer) clearTimeout(globalSaveTimer);
+      globalStatus.textContent = "Auto-apply in 1s…";
+      globalSaveTimer = setTimeout(() => {
+        saveGlobalInstructions(globalTextarea.value);
+      }, 1000);
+    }
+
+    globalTextarea.addEventListener("input", scheduleGlobalSave);
     function syncReadingOrder() {
       if (!orderAuto || !orderRtl || !orderTtb) return;
       const payload = {
@@ -960,19 +988,18 @@
         keepTranslationsOnNewImage
       });
     });
-    gRetry.onclick = () => {
-      browser.runtime.sendMessage({ action: "retry", manualOrder: buildManualOrderPayload() });
-    };
     gClear.onclick = async () => {
       try {
+        if (globalSaveTimer) clearTimeout(globalSaveTimer);
         await browser.runtime.sendMessage({ action: "clearGlobalInstructions" });
         globalTextarea.value = "";
+        lastGlobalValue = "";
         globalStatus.textContent = "Cleared";
         setTimeout(() => { if (globalStatus) globalStatus.textContent = ""; }, 1200);
       } catch {}
     };
 
-    gActions.append(gApply, gRetry, gClear, globalStatus);
+    gActions.append(gClear, globalStatus);
     globalBox.append(glabel, globalTextarea, orderRow, gActions);
 
     left.append(info, panelBody, globalBox);
@@ -1292,6 +1319,11 @@
   /* ═══════════════════════════════════════════════════════
      Render
      ═══════════════════════════════════════════════════════ */
+  function scrollTranslationsToLatest() {
+    if (!panelBody) return;
+    panelBody.scrollTop = panelBody.scrollHeight;
+  }
+
   function render(text, live) {
     if (!panelBody) return;
     const blocks = parseBlocks(text).filter(block => !ignoreSfx || block.cat !== "SFX");
@@ -1308,6 +1340,7 @@
       }
       panelBody.innerHTML = html;
       attachAnalysisToggle();
+      scrollTranslationsToLatest();
       return;
     }
 
@@ -1411,10 +1444,7 @@
       });
     });
 
-    if (live) {
-      const gap = panelBody.scrollHeight - panelBody.scrollTop - panelBody.clientHeight;
-      if (gap < 120) panelBody.scrollTop = panelBody.scrollHeight;
-    }
+    scrollTranslationsToLatest();
   }
 
   /* ═══════════════════════════════════════════════════════
