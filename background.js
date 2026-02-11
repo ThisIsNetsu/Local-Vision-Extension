@@ -478,12 +478,9 @@ const SYS_ANALYSE =
 `You are an expert manga/manhwa/manhua page analyst. Examine the image and write a brief scene analysis (2-4 sentences).
 Use mature, adult, and visceral language appropriate for explicit 18+ manga. Be candid about erotic or sexual details when present.
 
-Cover: what is happening in the scene, who appears to be speaking (if dialogue is visible), and the emotional tone or mood.
+Cover: what is happening in the scene, and who appears to be speaking (if dialogue is visible).
 
 If previously established character or story context is provided, use it to identify returning characters by name rather than re-describing them.
-
-Your FINAL sentence MUST state the detected source language and reading direction in this exact format:
-"Source: Japanese manga, read right-to-left." or "Source: Korean manhwa, read left-to-right." or "Source: Chinese manhua, read left-to-right."
 
 Output ONLY the analysis text. No formatting, no labels, no headers, no translation.`;
 
