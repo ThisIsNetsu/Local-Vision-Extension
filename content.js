@@ -1600,8 +1600,64 @@
       ]
     });
     addSettingsField(coreGrid, {
+      id: "OCR_TEMPERATURE",
+      label: "OCR pass temperature",
+      type: "number",
+      step: "0.05",
+      options: [
+        { value: "0.0", label: "0.0 (deterministic)", color: "#45e980" },
+        { value: "0.1", label: "0.1 (slightly flexible)", color: "#58a6ff" },
+        { value: "0.2", label: "0.2 (looser)", color: "#e9a045" }
+      ]
+    });
+    addSettingsField(coreGrid, {
+      id: "OCR_TOP_P",
+      label: "OCR pass top_p",
+      type: "number",
+      step: "0.01",
+      options: [
+        { value: "1.0", label: "1.0 (full)", color: "#45e980" },
+        { value: "0.95", label: "0.95 (slight filter)", color: "#58a6ff" },
+        { value: "0.9", label: "0.9 (stronger filter)", color: "#e9a045" }
+      ]
+    });
+    addSettingsField(coreGrid, {
+      id: "OCR_TOP_K",
+      label: "OCR pass top_k",
+      type: "number",
+      step: "1",
+      options: [
+        { value: "0", label: "0 (disabled)", color: "#45e980" },
+        { value: "20", label: "20 (moderate)", color: "#58a6ff" },
+        { value: "40", label: "40 (looser)", color: "#e9a045" }
+      ]
+    });
+    addSettingsField(coreGrid, {
+      id: "TRANSLATION_TEMPERATURE",
+      label: "Pass 2 translation temperature",
+      type: "number",
+      step: "0.05",
+      options: [
+        { value: "0.2", label: "0.2 (stable)", color: "#45e980" },
+        { value: "0.25", label: "0.25 (default)", color: "#45e980" },
+        { value: "0.3", label: "0.3 (slightly freer)", color: "#58a6ff" },
+        { value: "0.4", label: "0.4 (creative)", color: "#e9a045" }
+      ]
+    });
+    addSettingsField(coreGrid, {
+      id: "TRANSLATION_MIN_P",
+      label: "Pass 2 translation min_p",
+      type: "number",
+      step: "0.01",
+      options: [
+        { value: "0.05", label: "0.05 (default)", color: "#45e980" },
+        { value: "0.03", label: "0.03 (broader)", color: "#58a6ff" },
+        { value: "0.1", label: "0.1 (stricter)", color: "#e9a045" }
+      ]
+    });
+    addSettingsField(coreGrid, {
       id: "TEMPERATURE",
-      label: "Temperature",
+      label: "Legacy temperature (fallback)",
       type: "number",
       step: "0.05",
       options: [

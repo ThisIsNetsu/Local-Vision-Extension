@@ -5,8 +5,13 @@ const DEFAULT_SETTINGS = {
   LLAMA_SERVER: "http://127.0.0.1:8033",
   TARGET_LANG: "English",
   MAX_TOKENS: 2048,
-  TEMPERATURE: 0,
+  TEMPERATURE: 0.25,
   RETRY_TEMP: 0.2,
+  OCR_TEMPERATURE: 0,
+  OCR_TOP_P: 1,
+  OCR_TOP_K: 0,
+  TRANSLATION_TEMPERATURE: 0.25,
+  TRANSLATION_MIN_P: 0.05,
   IMG_MAX_DIM: 1024,
   REPEAT_PENALTY: 1.15,
   REPEAT_LAST_N: 256,
@@ -37,6 +42,15 @@ function normalizeSettings(next) {
   if ("MAX_TOKENS" in next) out.MAX_TOKENS = clampNum(next.MAX_TOKENS, DEFAULT_SETTINGS.MAX_TOKENS, 128, 8192);
   if ("TEMPERATURE" in next) out.TEMPERATURE = clampNum(next.TEMPERATURE, DEFAULT_SETTINGS.TEMPERATURE, 0, 2);
   if ("RETRY_TEMP" in next) out.RETRY_TEMP = clampNum(next.RETRY_TEMP, DEFAULT_SETTINGS.RETRY_TEMP, 0, 2);
+  if ("OCR_TEMPERATURE" in next) out.OCR_TEMPERATURE = clampNum(next.OCR_TEMPERATURE, DEFAULT_SETTINGS.OCR_TEMPERATURE, 0, 2);
+  if ("OCR_TOP_P" in next) out.OCR_TOP_P = clampNum(next.OCR_TOP_P, DEFAULT_SETTINGS.OCR_TOP_P, 0, 1);
+  if ("OCR_TOP_K" in next) out.OCR_TOP_K = clampNum(next.OCR_TOP_K, DEFAULT_SETTINGS.OCR_TOP_K, 0, 200);
+  if ("TRANSLATION_TEMPERATURE" in next) {
+    out.TRANSLATION_TEMPERATURE = clampNum(next.TRANSLATION_TEMPERATURE, DEFAULT_SETTINGS.TRANSLATION_TEMPERATURE, 0, 2);
+  } else if ("TEMPERATURE" in next) {
+    out.TRANSLATION_TEMPERATURE = clampNum(next.TEMPERATURE, DEFAULT_SETTINGS.TRANSLATION_TEMPERATURE, 0, 2);
+  }
+  if ("TRANSLATION_MIN_P" in next) out.TRANSLATION_MIN_P = clampNum(next.TRANSLATION_MIN_P, DEFAULT_SETTINGS.TRANSLATION_MIN_P, 0, 1);
   if ("IMG_MAX_DIM" in next) out.IMG_MAX_DIM = clampNum(next.IMG_MAX_DIM, DEFAULT_SETTINGS.IMG_MAX_DIM, 256, 4096);
   if ("REPEAT_PENALTY" in next) out.REPEAT_PENALTY = clampNum(next.REPEAT_PENALTY, DEFAULT_SETTINGS.REPEAT_PENALTY, 0.8, 2.0);
   if ("REPEAT_LAST_N" in next) out.REPEAT_LAST_N = clampNum(next.REPEAT_LAST_N, DEFAULT_SETTINGS.REPEAT_LAST_N, -1, 4096);
@@ -1005,7 +1019,9 @@ async function analyseScene(base64Url, tabId) {
         ]},
       ],
       max_tokens: 300,
-      temperature: 0.2,
+      temperature: settings.OCR_TEMPERATURE,
+      top_p: settings.OCR_TOP_P,
+      top_k: settings.OCR_TOP_K,
       stream: false,
     }),
   });
@@ -1276,7 +1292,8 @@ async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
       ]},
     ],
     max_tokens: settings.MAX_TOKENS,
-    ...getDeterministicSampling(isRetry ? settings.RETRY_TEMP : settings.TEMPERATURE),
+    ...getDeterministicSampling(isRetry ? settings.RETRY_TEMP : (settings.TRANSLATION_TEMPERATURE ?? settings.TEMPERATURE)),
+    min_p: settings.TRANSLATION_MIN_P,
     stream: true,
     repeat_penalty: settings.REPEAT_PENALTY,
     repeat_last_n: settings.REPEAT_LAST_N,
