@@ -1588,18 +1588,6 @@
       ]
     });
     addSettingsField(coreGrid, {
-      id: "IMG_MAX_DIM",
-      label: "Image max dimension",
-      type: "number",
-      step: "1",
-      options: [
-        { value: "768", label: "768 (fast)", color: "#58a6ff" },
-        { value: "1024", label: "1024 (balanced)", color: "#45e980" },
-        { value: "1536", label: "1536 (detail)", color: "#e9a045" },
-        { value: "2048", label: "2048 (hi-res)", color: "#e94560" }
-      ]
-    });
-    addSettingsField(coreGrid, {
       id: "OCR_TEMPERATURE",
       label: "OCR pass temperature",
       type: "number",

@@ -28,7 +28,6 @@ Current normalized fields (with defaults in `DEFAULT_SETTINGS`):
 - `MAX_TOKENS` (number)
 - `TEMPERATURE` (number)
 - `RETRY_TEMP` (number)
-- `IMG_MAX_DIM` (number)
 - `REPEAT_PENALTY` (number)
 - `REPEAT_LAST_N` (number)
 - `FREQUENCY_PENALTY` (number)

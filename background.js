@@ -12,7 +12,7 @@ const DEFAULT_SETTINGS = {
   OCR_TOP_K: 0,
   TRANSLATION_TEMPERATURE: 0.25,
   TRANSLATION_MIN_P: 0.05,
-  IMG_MAX_DIM: 1024,
+  IMG_MAX_DIM: 4096,
   REPEAT_PENALTY: 1.15,
   REPEAT_LAST_N: 256,
   FREQUENCY_PENALTY: 0.3,
@@ -51,7 +51,6 @@ function normalizeSettings(next) {
     out.TRANSLATION_TEMPERATURE = clampNum(next.TEMPERATURE, DEFAULT_SETTINGS.TRANSLATION_TEMPERATURE, 0, 2);
   }
   if ("TRANSLATION_MIN_P" in next) out.TRANSLATION_MIN_P = clampNum(next.TRANSLATION_MIN_P, DEFAULT_SETTINGS.TRANSLATION_MIN_P, 0, 1);
-  if ("IMG_MAX_DIM" in next) out.IMG_MAX_DIM = clampNum(next.IMG_MAX_DIM, DEFAULT_SETTINGS.IMG_MAX_DIM, 256, 4096);
   if ("REPEAT_PENALTY" in next) out.REPEAT_PENALTY = clampNum(next.REPEAT_PENALTY, DEFAULT_SETTINGS.REPEAT_PENALTY, 0.8, 2.0);
   if ("REPEAT_LAST_N" in next) out.REPEAT_LAST_N = clampNum(next.REPEAT_LAST_N, DEFAULT_SETTINGS.REPEAT_LAST_N, -1, 4096);
   if ("FREQUENCY_PENALTY" in next) out.FREQUENCY_PENALTY = clampNum(next.FREQUENCY_PENALTY, DEFAULT_SETTINGS.FREQUENCY_PENALTY, -2, 2);
@@ -1045,8 +1044,8 @@ async function fetchBlob(url, referer) {
 
 function bitmapToJpeg(bmp, sx, sy, sw, sh) {
   let w = sw, h = sh;
-  if (Math.max(w, h) > settings.IMG_MAX_DIM) {
-    const s = settings.IMG_MAX_DIM / Math.max(w, h);
+  if (Math.max(w, h) > DEFAULT_SETTINGS.IMG_MAX_DIM) {
+    const s = DEFAULT_SETTINGS.IMG_MAX_DIM / Math.max(w, h);
     w = Math.round(w * s); h = Math.round(h * s);
   }
   const c = document.createElement("canvas");

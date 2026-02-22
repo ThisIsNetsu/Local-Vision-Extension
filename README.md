@@ -72,7 +72,6 @@ Key settings live in the overlay **Settings** menu (⚙) and are persisted:
 - `LLAMA_SERVER`: server URL (default `http://127.0.0.1:8033`).
 - `TARGET_LANG`: output language (default `English`).
 - `MAX_TOKENS`, `TEMPERATURE`, penalties: model tuning values.
-- `IMG_MAX_DIM`: max size for image preprocessing.
 
 You can also edit prompt text and style profiles inside `background.js`.
 
