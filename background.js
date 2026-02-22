@@ -5,8 +5,8 @@ const DEFAULT_SETTINGS = {
   LLAMA_SERVER: "http://127.0.0.1:8033",
   TARGET_LANG: "English",
   MAX_TOKENS: 2048,
-  TEMPERATURE: 0.2,
-  RETRY_TEMP: 0.5,
+  TEMPERATURE: 0,
+  RETRY_TEMP: 0.2,
   IMG_MAX_DIM: 1024,
   REPEAT_PENALTY: 1.15,
   REPEAT_LAST_N: 256,
@@ -49,6 +49,14 @@ function normalizeSettings(next) {
   if ("LOOP_THRESHOLD" in next) out.LOOP_THRESHOLD = clampNum(next.LOOP_THRESHOLD, DEFAULT_SETTINGS.LOOP_THRESHOLD, 2, 10);
   if ("RETROACTIVE_CONTEXT" in next) out.RETROACTIVE_CONTEXT = !!next.RETROACTIVE_CONTEXT;
   return out;
+}
+
+function getDeterministicSampling(temperature) {
+  return {
+    temperature,
+    top_p: 1,
+    top_k: 0,
+  };
 }
 
 async function loadSettings() {
@@ -1268,7 +1276,7 @@ async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
       ]},
     ],
     max_tokens: settings.MAX_TOKENS,
-    temperature: isRetry ? settings.RETRY_TEMP : settings.TEMPERATURE,
+    ...getDeterministicSampling(isRetry ? settings.RETRY_TEMP : settings.TEMPERATURE),
     stream: true,
     repeat_penalty: settings.REPEAT_PENALTY,
     repeat_last_n: settings.REPEAT_LAST_N,
