@@ -2318,6 +2318,18 @@
           toast("Global instruction added");
         }
         break;
+      case "showTextTranslation": {
+        const original = msg.original || "";
+        const translation = msg.translation || "";
+        showOverlay(location.href, 0, analysisEnabled, styleSelect?.value || "explicit", ignoreSfx);
+        isStreaming = false;
+        currentAnalysis = "";
+        warnMap = {};
+        lastIncomingText = translation;
+        lastText = "[TEXT]\nORIGINAL: " + original + "\nTRANSLATION: " + translation;
+        render(lastText, false);
+        break;
+      }
       case "error":
         isStreaming = false;
         if (panelBody)

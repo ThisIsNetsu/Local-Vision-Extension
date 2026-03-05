@@ -1,6 +1,6 @@
 # VisionTranslate (Local Vision Extension)
 
-VisionTranslate is a Firefox extension that translates text found inside images (such as manga, manhwa, and manhua pages) by sending a selected image region to a local `llama.cpp` vision model server. It adds a context-menu option to select a region, renders an overlay with translations, and includes tools to refine and re-run translations without leaving the page.
+VisionTranslate is a Firefox extension that translates text found inside images (such as manga, manhwa, and manhua pages) by sending a selected image region to a local `llama.cpp` vision model server. It adds context-menu options for both image-region and selected-text translation, renders an overlay with translations, and includes tools to refine and re-run translations without leaving the page.
 
 > Status: Alpha. The project is under active development and behavior may change between updates.
 
@@ -13,6 +13,7 @@ VisionTranslate is a Firefox extension that translates text found inside images 
 ## Features
 
 - **Region selection**: draw a rectangle over any image area to translate only that portion.
+- **Selected text translation**: translate highlighted page text directly from the right-click menu.
 - **Translation overlay**: categorized output (Dialogue, Narration, SFX, Sign, Text) with streaming updates.
 - **Retranslation tools**:
   - Right-click a line for Standard / Literal / Natural retranslation.
@@ -50,6 +51,8 @@ The extension sends OpenAI-style `/v1/chat/completions` requests that include `i
 2. Right-click the image and choose **🔍 Select & Translate Region**.
 3. Draw a rectangle around the text you want translated.
 4. Review the translation in the overlay and adjust as needed.
+
+For text-only translation: highlight text on the page, right-click, and choose **📝 Translate Selected Text**.
 
 ### Overlay controls
 

@@ -657,6 +657,10 @@ browser.contextMenus.create({
   id: "vision-select-translate", title: "🔍 Select & Translate Region", contexts: ["image"],
 });
 
+browser.contextMenus.create({
+  id: "vision-translate-selected-text", title: "📝 Translate Selected Text", contexts: ["selection"],
+});
+
 browser.contextMenus.onClicked.addListener(async (info, tab) => {
   const imageUrl = info.srcUrl;
   const pageUrl  = info.pageUrl || "";
@@ -664,6 +668,35 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "vision-select-translate") {
     try { await tell(tab.id, { action: "showSelector", imageUrl, pageUrl }); }
     catch { await browser.tabs.executeScript(tab.id, { file: "content.js" }); await tell(tab.id, { action: "showSelector", imageUrl, pageUrl }); }
+  }
+
+  if (info.menuItemId === "vision-translate-selected-text") {
+    const selectedText = (info.selectionText || "").trim();
+    if (!selectedText) return;
+    try {
+      const result = await handleTranslateSelectedText(selectedText, tab.id);
+      try {
+        await tell(tab.id, {
+          action: "showTextTranslation",
+          original: selectedText,
+          translation: result.translation,
+        });
+      } catch {
+        await browser.tabs.executeScript(tab.id, { file: "content.js" });
+        await tell(tab.id, {
+          action: "showTextTranslation",
+          original: selectedText,
+          translation: result.translation,
+        });
+      }
+    } catch (err) {
+      try {
+        await tell(tab.id, { action: "error", message: friendlyError(err) });
+      } catch {
+        await browser.tabs.executeScript(tab.id, { file: "content.js" });
+        await tell(tab.id, { action: "error", message: friendlyError(err) });
+      }
+    }
   }
 });
 
@@ -912,6 +945,43 @@ async function handleRetranslate(original, style, tabId) {
       ...getNonThinkingOptions(),
     }),
   });
+  if (!res.ok) throw new Error("Server " + res.status);
+  const data = await res.json();
+  let text = data.choices?.[0]?.message?.content || "";
+  text = cleanOutput(text);
+  return { translation: text };
+}
+
+async function handleTranslateSelectedText(original, tabId) {
+  const targetLang = getTargetLang();
+  const styleId = getStyleId(tabId);
+  const stylePrompt = STYLE_PROFILES[styleId]?.prompt || "";
+  const history = buildHistoryPrefix(tabId);
+
+  const userParts = [];
+  if (globalInstructions) userParts.push("GLOBAL INSTRUCTIONS:\n" + globalInstructions);
+  if (stylePrompt) userParts.push("STYLE PROFILE:\n" + stylePrompt);
+  if (history) userParts.push(history.trim());
+  userParts.push("Translate this text into " + targetLang + ":\n" + original);
+
+  const res = await fetch(settings.LLAMA_SERVER + "/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages: [
+        {
+          role: "system",
+          content: "You are an expert translator. Output only the translation text with no explanations or labels.",
+        },
+        { role: "user", content: userParts.join("\n\n") },
+      ],
+      max_tokens: 512,
+      temperature: 0.2,
+      stream: false,
+      ...getNonThinkingOptions(),
+    }),
+  });
+
   if (!res.ok) throw new Error("Server " + res.status);
   const data = await res.json();
   let text = data.choices?.[0]?.message?.content || "";

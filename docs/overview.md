@@ -1,7 +1,7 @@
 # VisionTranslate Overview
 
 ## What this extension currently does
-- Adds an image context-menu action (`🔍 Select & Translate Region`) and asks the content script to start region selection. Source: `background.js` (`browser.contextMenus.create`, `browser.contextMenus.onClicked`).
+- Adds context-menu actions for image-region translation (`🔍 Select & Translate Region`) and selected-text translation (`📝 Translate Selected Text`). Source: `background.js` (`browser.contextMenus.create`, `browser.contextMenus.onClicked`).
 - Lets users draw a crop region over an image, then sends `{ action: "translateRegion", imageUrl, crop, pageUrl }` to background. Source: `content.js` (`startSel`, `findImageRect`).
 - Runs translation in two stages: scene analysis (optional per tab) then streaming translation for the selected crop. Source: `background.js` (`streamTranslation`, `analyseScene`).
 - Streams partial output into the overlay, then finalizes with de-duplication and optional SFX filtering. Source: `background.js` (`streamTranslation`, `dedupeOutput`, `filterSfxBlocks`), `content.js` (`browser.runtime.onMessage` handling `chunk`/`done`).
@@ -14,7 +14,7 @@
 - **Global instructions**: in-memory string shared across tabs until browser restart. Source: `background.js` (`globalInstructions`, `setGlobalInstructions`, `clearGlobalInstructions`).
 
 ## User-visible controls currently wired
-- Overlay controls: retry, style select, analysis toggle, context viewer badge, settings modal, global instructions box. Source: `content.js` (`showOverlay`, `openCtxViewer`, `openSettingsModal`).
+- Overlay controls: retry, style select, analysis toggle, context viewer badge, settings modal, global instructions box, and selected-text translation display. Source: `content.js` (`showOverlay`, `openCtxViewer`, `openSettingsModal`, `browser.runtime.onMessage`).
 - Reading-order controls: auto/manual direction settings sent to background. Source: `content.js` (`syncReadingOrder` inside `showOverlay`), `background.js` (`setReadingOrder`, `buildManualOrderDirective`, `detectReadingOrder`).
 - Text chat panel: sends `addUserNote` and `chat`. Source: `content.js` (`sendChat`), `background.js` (`handleChat`, `addUserNote`).
 
