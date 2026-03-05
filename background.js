@@ -5,13 +5,15 @@ const DEFAULT_SETTINGS = {
   LLAMA_SERVER: "http://127.0.0.1:8033",
   TARGET_LANG: "English",
   MAX_TOKENS: 2048,
-  TEMPERATURE: 0.25,
-  RETRY_TEMP: 0.2,
+  TEMPERATURE: 0.7,
+  RETRY_TEMP: 0.7,
   OCR_TEMPERATURE: 0,
   OCR_TOP_P: 1,
   OCR_TOP_K: 0,
-  TRANSLATION_TEMPERATURE: 0.25,
-  TRANSLATION_MIN_P: 0.05,
+  TRANSLATION_TEMPERATURE: 0.7,
+  TRANSLATION_TOP_P: 0.8,
+  TRANSLATION_TOP_K: 20,
+  TRANSLATION_MIN_P: 0,
   IMG_MAX_DIM: 4096,
   REPEAT_PENALTY: 1.15,
   REPEAT_LAST_N: 256,
@@ -50,6 +52,8 @@ function normalizeSettings(next) {
   } else if ("TEMPERATURE" in next) {
     out.TRANSLATION_TEMPERATURE = clampNum(next.TEMPERATURE, DEFAULT_SETTINGS.TRANSLATION_TEMPERATURE, 0, 2);
   }
+  if ("TRANSLATION_TOP_P" in next) out.TRANSLATION_TOP_P = clampNum(next.TRANSLATION_TOP_P, DEFAULT_SETTINGS.TRANSLATION_TOP_P, 0, 1);
+  if ("TRANSLATION_TOP_K" in next) out.TRANSLATION_TOP_K = clampNum(next.TRANSLATION_TOP_K, DEFAULT_SETTINGS.TRANSLATION_TOP_K, 0, 200);
   if ("TRANSLATION_MIN_P" in next) out.TRANSLATION_MIN_P = clampNum(next.TRANSLATION_MIN_P, DEFAULT_SETTINGS.TRANSLATION_MIN_P, 0, 1);
   if ("REPEAT_PENALTY" in next) out.REPEAT_PENALTY = clampNum(next.REPEAT_PENALTY, DEFAULT_SETTINGS.REPEAT_PENALTY, 0.8, 2.0);
   if ("REPEAT_LAST_N" in next) out.REPEAT_LAST_N = clampNum(next.REPEAT_LAST_N, DEFAULT_SETTINGS.REPEAT_LAST_N, -1, 4096);
@@ -64,11 +68,17 @@ function normalizeSettings(next) {
   return out;
 }
 
-function getDeterministicSampling(temperature) {
+function getTranslationSampling(temperature) {
   return {
     temperature,
-    top_p: 1,
-    top_k: 0,
+    top_p: settings.TRANSLATION_TOP_P,
+    top_k: settings.TRANSLATION_TOP_K,
+  };
+}
+
+function getNonThinkingOptions() {
+  return {
+    chat_template_kwargs: { enable_thinking: false }
   };
 }
 
@@ -287,7 +297,8 @@ async function updateStoryRegistry(tabId, analysis, filteredTranslation, userNot
         messages: [{ role: "user", content: prompt }],
         temperature: 0.3,
         max_tokens: 300,
-        stream: false
+        stream: false,
+        ...getNonThinkingOptions(),
       })
     });
     const data = await res.json();
@@ -350,7 +361,8 @@ Return JSON only.`;
       ],
       temperature: 0.2,
       max_tokens: 500,
-      stream: false
+      stream: false,
+      ...getNonThinkingOptions(),
     })
   });
   if (!res.ok) return null;
@@ -433,7 +445,8 @@ Output ONLY the compacted entry.`;
       ],
       temperature: 0.2,
       max_tokens: 200,
-      stream: false
+      stream: false,
+      ...getNonThinkingOptions(),
     })
   });
   if (!res.ok) return null;
@@ -896,6 +909,7 @@ async function handleRetranslate(original, style, tabId) {
       max_tokens: 512,
       temperature: 0.15,
       stream: false,
+      ...getNonThinkingOptions(),
     }),
   });
   if (!res.ok) throw new Error("Server " + res.status);
@@ -936,6 +950,7 @@ Output ONLY the revised translated text, no labels.`;
       max_tokens: 256,
       temperature: 0.2,
       stream: false,
+      ...getNonThinkingOptions(),
     }),
   });
   if (!res.ok) throw new Error("Server " + res.status);
@@ -977,6 +992,7 @@ Should this become a global instruction?`;
       max_tokens: 80,
       temperature: 0.2,
       stream: false,
+      ...getNonThinkingOptions(),
     }),
   });
   if (!res.ok) return;
@@ -1022,6 +1038,7 @@ async function analyseScene(base64Url, tabId) {
       top_p: settings.OCR_TOP_P,
       top_k: settings.OCR_TOP_K,
       stream: false,
+      ...getNonThinkingOptions(),
     }),
   });
   if (!res.ok) throw new Error("Analysis failed: " + res.status);
@@ -1291,8 +1308,9 @@ async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
       ]},
     ],
     max_tokens: settings.MAX_TOKENS,
-    ...getDeterministicSampling(isRetry ? settings.RETRY_TEMP : (settings.TRANSLATION_TEMPERATURE ?? settings.TEMPERATURE)),
+    ...getTranslationSampling(isRetry ? settings.RETRY_TEMP : (settings.TRANSLATION_TEMPERATURE ?? settings.TEMPERATURE)),
     min_p: settings.TRANSLATION_MIN_P,
+    ...getNonThinkingOptions(),
     stream: true,
     repeat_penalty: settings.REPEAT_PENALTY,
     repeat_last_n: settings.REPEAT_LAST_N,

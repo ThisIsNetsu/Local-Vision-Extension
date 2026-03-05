@@ -1507,22 +1507,22 @@
       {
         id: "balanced",
         label: "Balanced (recommended)",
-        values: { MAX_TOKENS: 2048, TEMPERATURE: 0.2, RETRY_TEMP: 0.5, REPEAT_PENALTY: 1.15 }
+        values: { MAX_TOKENS: 2048, TEMPERATURE: 0.7, TRANSLATION_TEMPERATURE: 0.7, TRANSLATION_TOP_P: 0.8, TRANSLATION_TOP_K: 20, TRANSLATION_MIN_P: 0.0, RETRY_TEMP: 0.7, REPEAT_PENALTY: 1.15 }
       },
       {
         id: "creative",
         label: "Creative (looser wording)",
-        values: { TEMPERATURE: 0.7, RETRY_TEMP: 0.9, FREQUENCY_PENALTY: 0.1, PRESENCE_PENALTY: 0.2 }
+        values: { TEMPERATURE: 0.9, TRANSLATION_TEMPERATURE: 0.9, TRANSLATION_TOP_P: 0.9, TRANSLATION_TOP_K: 40, TRANSLATION_MIN_P: 0.0, RETRY_TEMP: 1.0, FREQUENCY_PENALTY: 0.1, PRESENCE_PENALTY: 0.2 }
       },
       {
         id: "strict",
         label: "Strict (more literal)",
-        values: { TEMPERATURE: 0.1, RETRY_TEMP: 0.3, REPEAT_PENALTY: 1.2, FREQUENCY_PENALTY: 0.4 }
+        values: { TEMPERATURE: 0.5, TRANSLATION_TEMPERATURE: 0.5, TRANSLATION_TOP_P: 0.7, TRANSLATION_TOP_K: 20, TRANSLATION_MIN_P: 0.05, RETRY_TEMP: 0.5, REPEAT_PENALTY: 1.2, FREQUENCY_PENALTY: 0.4 }
       },
       {
         id: "long",
         label: "Long output (big pages)",
-        values: { MAX_TOKENS: 4096, TEMPERATURE: 0.25, RETRY_TEMP: 0.6 }
+        values: { MAX_TOKENS: 4096, TEMPERATURE: 0.7, TRANSLATION_TEMPERATURE: 0.7, TRANSLATION_TOP_P: 0.8, TRANSLATION_TOP_K: 20, TRANSLATION_MIN_P: 0.0, RETRY_TEMP: 0.8 }
       }
     ];
     presets.forEach(preset => {
@@ -1626,10 +1626,10 @@
       type: "number",
       step: "0.05",
       options: [
-        { value: "0.2", label: "0.2 (stable)", color: "#45e980" },
-        { value: "0.25", label: "0.25 (default)", color: "#45e980" },
-        { value: "0.3", label: "0.3 (slightly freer)", color: "#58a6ff" },
-        { value: "0.4", label: "0.4 (creative)", color: "#e9a045" }
+        { value: "0.7", label: "0.7 (Qwen3.5 non-thinking default)", color: "#45e980" },
+        { value: "0.5", label: "0.5 (stricter)", color: "#58a6ff" },
+        { value: "0.9", label: "0.9 (broader)", color: "#e9a045" },
+        { value: "1.1", label: "1.1 (risky)", color: "#e94560" }
       ]
     });
     addSettingsField(coreGrid, {
@@ -1638,9 +1638,32 @@
       type: "number",
       step: "0.01",
       options: [
-        { value: "0.05", label: "0.05 (default)", color: "#45e980" },
-        { value: "0.03", label: "0.03 (broader)", color: "#58a6ff" },
-        { value: "0.1", label: "0.1 (stricter)", color: "#e9a045" }
+        { value: "0.0", label: "0.0 (Qwen3.5 non-thinking default)", color: "#45e980" },
+        { value: "0.03", label: "0.03 (slight filter)", color: "#58a6ff" },
+        { value: "0.05", label: "0.05 (stricter)", color: "#e9a045" }
+      ]
+    });
+    addSettingsField(coreGrid, {
+      id: "TRANSLATION_TOP_P",
+      label: "Pass 2 translation top_p",
+      type: "number",
+      step: "0.01",
+      options: [
+        { value: "0.8", label: "0.8 (Qwen3.5 non-thinking default)", color: "#45e980" },
+        { value: "0.7", label: "0.7 (stricter)", color: "#58a6ff" },
+        { value: "0.9", label: "0.9 (broader)", color: "#e9a045" },
+        { value: "1.0", label: "1.0 (full)", color: "#e94560" }
+      ]
+    });
+    addSettingsField(coreGrid, {
+      id: "TRANSLATION_TOP_K",
+      label: "Pass 2 translation top_k",
+      type: "number",
+      step: "1",
+      options: [
+        { value: "20", label: "20 (Qwen3.5 non-thinking default)", color: "#45e980" },
+        { value: "0", label: "0 (disabled)", color: "#58a6ff" },
+        { value: "40", label: "40 (broader)", color: "#e9a045" }
       ]
     });
     addSettingsField(coreGrid, {
@@ -1649,11 +1672,10 @@
       type: "number",
       step: "0.05",
       options: [
-        { value: "0.1", label: "0.1 (very strict)", color: "#45e980" },
-        { value: "0.2", label: "0.2 (stable)", color: "#45e980" },
-        { value: "0.4", label: "0.4 (balanced)", color: "#58a6ff" },
-        { value: "0.7", label: "0.7 (creative)", color: "#e9a045" },
-        { value: "1.0", label: "1.0 (risky)", color: "#e94560" }
+        { value: "0.7", label: "0.7 (Qwen3.5 non-thinking default)", color: "#45e980" },
+        { value: "0.5", label: "0.5 (strict)", color: "#58a6ff" },
+        { value: "0.9", label: "0.9 (broader)", color: "#e9a045" },
+        { value: "1.1", label: "1.1 (risky)", color: "#e94560" }
       ]
     });
     addSettingsField(coreGrid, {
@@ -1662,11 +1684,10 @@
       type: "number",
       step: "0.05",
       options: [
-        { value: "0.3", label: "0.3 (careful)", color: "#45e980" },
-        { value: "0.5", label: "0.5 (balanced)", color: "#58a6ff" },
-        { value: "0.7", label: "0.7 (creative)", color: "#e9a045" },
-        { value: "0.9", label: "0.9 (bold)", color: "#e9a045" },
-        { value: "1.2", label: "1.2 (unstable)", color: "#e94560" }
+        { value: "0.7", label: "0.7 (Qwen3.5 non-thinking default)", color: "#45e980" },
+        { value: "0.5", label: "0.5 (careful)", color: "#58a6ff" },
+        { value: "0.9", label: "0.9 (broader)", color: "#e9a045" },
+        { value: "1.1", label: "1.1 (risky)", color: "#e94560" }
       ]
     });
     body.appendChild(coreGrid);

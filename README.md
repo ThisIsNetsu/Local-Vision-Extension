@@ -27,7 +27,7 @@ VisionTranslate is a Firefox extension that translates text found inside images 
 
 - **Browser**: Firefox (Manifest V2 with `browser.*` APIs).
   - Chromium-based browsers will require MV3 migration and a polyfill.
-- **Local model server**: `llama.cpp` running on `http://127.0.0.1:8033` with a vision-capable model (the prompts are optimized for Qwen3-VL style models).
+- **Local model server**: `llama.cpp` running on `http://127.0.0.1:8033` with a vision-capable model (the prompts/settings are tuned for Qwen3.5 in non-thinking mode).
 
 ### llama.cpp server expectations
 
@@ -71,7 +71,7 @@ Key settings live in the overlay **Settings** menu (⚙) and are persisted:
 
 - `LLAMA_SERVER`: server URL (default `http://127.0.0.1:8033`).
 - `TARGET_LANG`: output language (default `English`).
-- `MAX_TOKENS`, `TEMPERATURE`, penalties: model tuning values.
+- `MAX_TOKENS`, `TRANSLATION_TEMPERATURE`, `TRANSLATION_TOP_P`, `TRANSLATION_TOP_K`, `TRANSLATION_MIN_P`, and penalties: model tuning values.
 
 You can also edit prompt text and style profiles inside `background.js`.
 
