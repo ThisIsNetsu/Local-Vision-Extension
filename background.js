@@ -700,6 +700,18 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
+browser.browserAction.onClicked.addListener(async (tab) => {
+  if (!tab?.id) return;
+  try {
+    await tell(tab.id, { action: "reopenOverlay" });
+  } catch {
+    try {
+      await browser.tabs.executeScript(tab.id, { file: "content.js" });
+      await tell(tab.id, { action: "reopenOverlay" });
+    } catch {}
+  }
+});
+
 // =================== MESSAGE HANDLING ===================
 browser.runtime.onMessage.addListener((msg, sender) => {
   const tabId = sender.tab?.id;

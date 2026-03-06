@@ -2338,6 +2338,15 @@
       case "showSelector":
         startSel(msg.imageUrl, msg.pageUrl);
         break;
+      case "reopenOverlay":
+        showOverlay(currentImageUrl || location.href, currentHistoryCount || 0, analysisEnabled, styleSelect?.value || "explicit", ignoreSfx);
+        isStreaming = false;
+        if (lastText) {
+          render(lastText, false);
+        } else if (panelBody) {
+          panelBody.innerHTML = '<div class="vtl-status">Overlay reopened. Use Select &amp; Translate Region to start a new translation.</div>';
+        }
+        break;
     }
   });
 })();

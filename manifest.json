@@ -12,13 +12,26 @@
     "<all_urls>"
   ],
   "background": {
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ]
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "browser_action": {
+    "default_title": "VisionTranslate",
+    "default_icon": {
+      "16": "icons/translate-toolbar.svg",
+      "32": "icons/translate-toolbar.svg"
+    }
+  }
 }

@@ -54,6 +54,8 @@ The extension sends OpenAI-style `/v1/chat/completions` requests that include `i
 
 For text-only translation: highlight text on the page, right-click, and choose **📝 Translate Selected Text**.
 
+Tip: click the extension toolbar button to reopen the overlay if you closed it accidentally.
+
 ### Overlay controls
 
 - **Analysis toggle**: enable/disable scene analysis.
