@@ -1,0 +1,310 @@
+diff --git a/README.md b/README.md
+index 914786cb53a8731c2151909fb7101654adbc2431..8068e3b1c646bca042788a60d55dbe5cd39595d7 100644
+--- a/README.md
++++ b/README.md
+@@ -50,51 +50,50 @@ The extension sends OpenAI-style `/v1/chat/completions` requests that include `i
+ 2. Right-click the image and choose **🔍 Select & Translate Region**.
+ 3. Draw a rectangle around the text you want translated.
+ 4. Review the translation in the overlay and adjust as needed.
+ 
+ ### Overlay controls
+ 
+ - **Analysis toggle**: enable/disable scene analysis.
+ - **Retry**: re-run translation if text was missed.
+ - **Style dropdown**: choose a style profile (Explicit, Literal, Localized, Erotic, Crude).
+ - **Settings**: open the settings menu to change server URL, language, and model tuning.
+ - **Global instructions**: apply instructions across all tabs until restart.
+ - **Context badge**: view stored page context and history.
+ 
+ ### Per-line actions
+ 
+ - Right-click a translated line for Standard / Literal / Natural retranslation.
+ - Add a note to a line to auto-retranslate with the note applied.
+ 
+ ## Configuration
+ 
+ Key settings live in the overlay **Settings** menu (⚙) and are persisted:
+ 
+ - `LLAMA_SERVER`: server URL (default `http://127.0.0.1:8033`).
+ - `TARGET_LANG`: output language (default `English`).
+ - `MAX_TOKENS`, `TEMPERATURE`, penalties: model tuning values.
+-- `IMG_MAX_DIM`: max size for image preprocessing.
+ 
+ You can also edit prompt text and style profiles inside `background.js`.
+ 
+ ## Permissions
+ 
+ The extension requests:
+ 
+ - `contextMenus` (to add translation options in right-click menus)
+ - `activeTab`
+ - `webRequest` and `webRequestBlocking` on `<all_urls>` (used to inject a Referer header when fetching images)
+ 
+ ## Limitations
+ 
+ - Manifest V2 is deprecated in Chromium; Firefox still supports it.
+ - The extension assumes a local `llama.cpp` server is running with a vision model.
+ - Some sites block cross-origin image fetching; translations may fail if the image is not accessible.
+ 
+ ## Troubleshooting
+ 
+ - **Cannot reach llama.cpp**: Start your server and confirm it listens on `127.0.0.1:8033`.
+ - **Blank or missing translations**: Use **Retry** or check server logs for model errors.
+ - **Region translate does nothing**: Confirm the image is accessible and not blocked by CSP/hotlinking.
+ 
+ ## Project structure
+ 
+diff --git a/background.js b/background.js
+index 009c6fb682a48a205b958746aeb4d4bfc86dfca2..9c841bbe3d5f27024fcc6dc89d949fd49dd19030 100644
+--- a/background.js
++++ b/background.js
+@@ -1,79 +1,78 @@
+ "use strict";
+ 
+ // ========================= CONFIGURATION =========================
+ const DEFAULT_SETTINGS = {
+   LLAMA_SERVER: "http://127.0.0.1:8033",
+   TARGET_LANG: "English",
+   MAX_TOKENS: 2048,
+   TEMPERATURE: 0.25,
+   RETRY_TEMP: 0.2,
+   OCR_TEMPERATURE: 0,
+   OCR_TOP_P: 1,
+   OCR_TOP_K: 0,
+   TRANSLATION_TEMPERATURE: 0.25,
+   TRANSLATION_MIN_P: 0.05,
+-  IMG_MAX_DIM: 1024,
++  IMG_MAX_DIM: 4096,
+   REPEAT_PENALTY: 1.15,
+   REPEAT_LAST_N: 256,
+   FREQUENCY_PENALTY: 0.3,
+   PRESENCE_PENALTY: 0.2,
+   DRY_MULTIPLIER: 0.8,
+   DRY_BASE: 1.75,
+   DRY_ALLOWED_LENGTH: 2,
+   DRY_PENALTY_LAST_N: -1,
+   LOOP_THRESHOLD: 3,
+   RETROACTIVE_CONTEXT: true,
+ };
+ 
+ let settings = { ...DEFAULT_SETTINGS };
+ 
+ function normalizeSettings(next) {
+   if (!next || typeof next !== "object") return {};
+   const clampNum = (value, fallback, min, max) => {
+     const num = Number(value);
+     if (!Number.isFinite(num)) return fallback;
+     if (min != null && num < min) return min;
+     if (max != null && num > max) return max;
+     return num;
+   };
+   const out = {};
+   if (typeof next.LLAMA_SERVER === "string") out.LLAMA_SERVER = next.LLAMA_SERVER.trim() || DEFAULT_SETTINGS.LLAMA_SERVER;
+   if (typeof next.TARGET_LANG === "string") out.TARGET_LANG = next.TARGET_LANG.trim() || DEFAULT_SETTINGS.TARGET_LANG;
+   if ("MAX_TOKENS" in next) out.MAX_TOKENS = clampNum(next.MAX_TOKENS, DEFAULT_SETTINGS.MAX_TOKENS, 128, 8192);
+   if ("TEMPERATURE" in next) out.TEMPERATURE = clampNum(next.TEMPERATURE, DEFAULT_SETTINGS.TEMPERATURE, 0, 2);
+   if ("RETRY_TEMP" in next) out.RETRY_TEMP = clampNum(next.RETRY_TEMP, DEFAULT_SETTINGS.RETRY_TEMP, 0, 2);
+   if ("OCR_TEMPERATURE" in next) out.OCR_TEMPERATURE = clampNum(next.OCR_TEMPERATURE, DEFAULT_SETTINGS.OCR_TEMPERATURE, 0, 2);
+   if ("OCR_TOP_P" in next) out.OCR_TOP_P = clampNum(next.OCR_TOP_P, DEFAULT_SETTINGS.OCR_TOP_P, 0, 1);
+   if ("OCR_TOP_K" in next) out.OCR_TOP_K = clampNum(next.OCR_TOP_K, DEFAULT_SETTINGS.OCR_TOP_K, 0, 200);
+   if ("TRANSLATION_TEMPERATURE" in next) {
+     out.TRANSLATION_TEMPERATURE = clampNum(next.TRANSLATION_TEMPERATURE, DEFAULT_SETTINGS.TRANSLATION_TEMPERATURE, 0, 2);
+   } else if ("TEMPERATURE" in next) {
+     out.TRANSLATION_TEMPERATURE = clampNum(next.TEMPERATURE, DEFAULT_SETTINGS.TRANSLATION_TEMPERATURE, 0, 2);
+   }
+   if ("TRANSLATION_MIN_P" in next) out.TRANSLATION_MIN_P = clampNum(next.TRANSLATION_MIN_P, DEFAULT_SETTINGS.TRANSLATION_MIN_P, 0, 1);
+-  if ("IMG_MAX_DIM" in next) out.IMG_MAX_DIM = clampNum(next.IMG_MAX_DIM, DEFAULT_SETTINGS.IMG_MAX_DIM, 256, 4096);
+   if ("REPEAT_PENALTY" in next) out.REPEAT_PENALTY = clampNum(next.REPEAT_PENALTY, DEFAULT_SETTINGS.REPEAT_PENALTY, 0.8, 2.0);
+   if ("REPEAT_LAST_N" in next) out.REPEAT_LAST_N = clampNum(next.REPEAT_LAST_N, DEFAULT_SETTINGS.REPEAT_LAST_N, -1, 4096);
+   if ("FREQUENCY_PENALTY" in next) out.FREQUENCY_PENALTY = clampNum(next.FREQUENCY_PENALTY, DEFAULT_SETTINGS.FREQUENCY_PENALTY, -2, 2);
+   if ("PRESENCE_PENALTY" in next) out.PRESENCE_PENALTY = clampNum(next.PRESENCE_PENALTY, DEFAULT_SETTINGS.PRESENCE_PENALTY, -2, 2);
+   if ("DRY_MULTIPLIER" in next) out.DRY_MULTIPLIER = clampNum(next.DRY_MULTIPLIER, DEFAULT_SETTINGS.DRY_MULTIPLIER, 0, 2);
+   if ("DRY_BASE" in next) out.DRY_BASE = clampNum(next.DRY_BASE, DEFAULT_SETTINGS.DRY_BASE, 0, 4);
+   if ("DRY_ALLOWED_LENGTH" in next) out.DRY_ALLOWED_LENGTH = clampNum(next.DRY_ALLOWED_LENGTH, DEFAULT_SETTINGS.DRY_ALLOWED_LENGTH, 0, 10);
+   if ("DRY_PENALTY_LAST_N" in next) out.DRY_PENALTY_LAST_N = clampNum(next.DRY_PENALTY_LAST_N, DEFAULT_SETTINGS.DRY_PENALTY_LAST_N, -1, 4096);
+   if ("LOOP_THRESHOLD" in next) out.LOOP_THRESHOLD = clampNum(next.LOOP_THRESHOLD, DEFAULT_SETTINGS.LOOP_THRESHOLD, 2, 10);
+   if ("RETROACTIVE_CONTEXT" in next) out.RETROACTIVE_CONTEXT = !!next.RETROACTIVE_CONTEXT;
+   return out;
+ }
+ 
+ function getDeterministicSampling(temperature) {
+   return {
+     temperature,
+     top_p: 1,
+     top_k: 0,
+   };
+ }
+ 
+ async function loadSettings() {
+   try {
+     const stored = await browser.storage.local.get("settings");
+     if (stored?.settings) {
+@@ -1023,52 +1022,52 @@ async function analyseScene(base64Url, tabId) {
+       top_p: settings.OCR_TOP_P,
+       top_k: settings.OCR_TOP_K,
+       stream: false,
+     }),
+   });
+   if (!res.ok) throw new Error("Analysis failed: " + res.status);
+   const data = await res.json();
+   let text = data.choices?.[0]?.message?.content || "";
+   return cleanOutput(text);
+ }
+ 
+ // =================== HELPERS ===================
+ function tell(tabId, msg) { return browser.tabs.sendMessage(tabId, msg); }
+ 
+ async function fetchBlob(url, referer) {
+   pendingReferer = referer || "";
+   try {
+     const res = await fetch(url);
+     if (!res.ok) throw new Error("Image download failed (" + res.status + ")");
+     return await res.blob();
+   } finally { pendingReferer = ""; }
+ }
+ 
+ function bitmapToJpeg(bmp, sx, sy, sw, sh) {
+   let w = sw, h = sh;
+-  if (Math.max(w, h) > settings.IMG_MAX_DIM) {
+-    const s = settings.IMG_MAX_DIM / Math.max(w, h);
++  if (Math.max(w, h) > DEFAULT_SETTINGS.IMG_MAX_DIM) {
++    const s = DEFAULT_SETTINGS.IMG_MAX_DIM / Math.max(w, h);
+     w = Math.round(w * s); h = Math.round(h * s);
+   }
+   const c = document.createElement("canvas");
+   c.width = w; c.height = h;
+   const ctx = c.getContext("2d");
+   ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, w, h);
+   ctx.drawImage(bmp, sx, sy, sw, sh, 0, 0, w, h);
+   return c.toDataURL("image/jpeg", 0.95);
+ }
+ 
+ async function imageToBase64Jpeg(url, referer) {
+   const blob = await fetchBlob(url, referer);
+   const bmp = await createImageBitmap(blob);
+   const r = bitmapToJpeg(bmp, 0, 0, bmp.width, bmp.height);
+   bmp.close(); return r;
+ }
+ 
+ async function cropAndEncode(url, crop, referer) {
+   const blob = await fetchBlob(url, referer);
+   const bmp = await createImageBitmap(blob);
+   const sx = Math.round(crop.x * bmp.width);
+   const sy = Math.round(crop.y * bmp.height);
+   const sw = Math.max(1, Math.round(crop.w * bmp.width));
+   const sh = Math.max(1, Math.round(crop.h * bmp.height));
+   const r = bitmapToJpeg(bmp, sx, sy, sw, sh);
+diff --git a/content.js b/content.js
+index e23432a43022a790fd706a00bf87bbff08b1d2af..0785389347ace1b7472ec74ab2f697dc8dcacacf 100644
+--- a/content.js
++++ b/content.js
+@@ -1565,62 +1565,50 @@
+       id: "TARGET_LANG",
+       label: "Target language",
+       placeholder: "English",
+       options: [
+         { value: "English", label: "English (default)", color: "#45e980" },
+         { value: "Spanish", label: "Spanish (common)", color: "#58a6ff" },
+         { value: "Portuguese", label: "Portuguese (common)", color: "#58a6ff" },
+         { value: "French", label: "French (common)", color: "#58a6ff" },
+         { value: "German", label: "German (common)", color: "#58a6ff" },
+         { value: "Indonesian", label: "Indonesian (common)", color: "#58a6ff" }
+       ]
+     });
+     addSettingsField(coreGrid, {
+       id: "MAX_TOKENS",
+       label: "Max tokens",
+       type: "number",
+       step: "1",
+       options: [
+         { value: "512", label: "512 (short)", color: "#e9a045" },
+         { value: "1024", label: "1024 (compact)", color: "#58a6ff" },
+         { value: "2048", label: "2048 (balanced)", color: "#45e980" },
+         { value: "4096", label: "4096 (long)", color: "#e9a045" },
+         { value: "8192", label: "8192 (very long)", color: "#e94560" }
+       ]
+     });
+-    addSettingsField(coreGrid, {
+-      id: "IMG_MAX_DIM",
+-      label: "Image max dimension",
+-      type: "number",
+-      step: "1",
+-      options: [
+-        { value: "768", label: "768 (fast)", color: "#58a6ff" },
+-        { value: "1024", label: "1024 (balanced)", color: "#45e980" },
+-        { value: "1536", label: "1536 (detail)", color: "#e9a045" },
+-        { value: "2048", label: "2048 (hi-res)", color: "#e94560" }
+-      ]
+-    });
+     addSettingsField(coreGrid, {
+       id: "OCR_TEMPERATURE",
+       label: "OCR pass temperature",
+       type: "number",
+       step: "0.05",
+       options: [
+         { value: "0.0", label: "0.0 (deterministic)", color: "#45e980" },
+         { value: "0.1", label: "0.1 (slightly flexible)", color: "#58a6ff" },
+         { value: "0.2", label: "0.2 (looser)", color: "#e9a045" }
+       ]
+     });
+     addSettingsField(coreGrid, {
+       id: "OCR_TOP_P",
+       label: "OCR pass top_p",
+       type: "number",
+       step: "0.01",
+       options: [
+         { value: "1.0", label: "1.0 (full)", color: "#45e980" },
+         { value: "0.95", label: "0.95 (slight filter)", color: "#58a6ff" },
+         { value: "0.9", label: "0.9 (stronger filter)", color: "#e9a045" }
+       ]
+     });
+     addSettingsField(coreGrid, {
+       id: "OCR_TOP_K",
+       label: "OCR pass top_k",
+diff --git a/docs/contracts.md b/docs/contracts.md
+index ddee8c446d89cb912b3c126279fb660124d57dfc..3e89379253b774da4a259571236d241a68fbfc8b 100644
+--- a/docs/contracts.md
++++ b/docs/contracts.md
+@@ -6,42 +6,41 @@
+ 1. **Region translation is message-driven**: content must send `translateRegion`; background owns crop encode + pipeline execution. Source: `content.js` (`startSel`), `background.js` (`browser.runtime.onMessage` -> `translateRegion`).
+ 2. **Pipeline order is analysis-before-translation** when analysis is enabled. Source: `background.js` (`streamTranslation`).
+ 3. **Streaming output is sanitized**: strips `<think>`, removes `/no_think`, dedupes repeated blocks, optional SFX filtering if enabled. Source: `background.js` (`stripThink`, `cleanOutput`, `dedupeOutput`, `filterSfxBlocks`, `streamTranslation`).
+ 4. **History updates are image-aware**: retry may replace last entry for same image; new image pushes a new entry; history capped to 10 entries. Source: `background.js` (`replaceLastHist`, `pushHist`, `MAX_HISTORY`, `streamTranslation`).
+ 5. **Retroactive edits require strict JSON plan and safe application**; invalid/non-JSON is ignored. Source: `background.js` (`requestRetroactiveEditPlan`, `applyRetroactiveEditPlan`, `isHistoryEntrySane`, `retroactivelyUpdateHistory`).
+ 6. **Per-line note behavior**: Enter (without Shift) blurs/submits note path; line note changes debounce and can trigger retranslation + note persistence. Source: `content.js` (note input handlers in `render`), `background.js` (`retranslateEntryWithNote`, `addUserNote`).
+ 7. **Region-selection cancel uses Escape**. Source: `content.js` (`bindOverlayKeys`, `startSel`).
+ 
+ ### Intended invariants (should not be broken)
+ - Keep background/content message actions backward compatible for existing UI flows. Source locations to verify: `background.js` (`browser.runtime.onMessage`) and `content.js` (`browser.runtime.onMessage`).
+ - Do not broaden extension permissions unless strictly required. Source baseline: `manifest.json` (`permissions`).
+ - LLM edit plans for retroactive context remain strict JSON-only and are ignored if malformed. Source: `background.js` (`requestRetroactiveEditPlan`).
+ - Avoid duplicate translated entries in final output. Source: `background.js` (`dedupeOutput`).
+ 
+ ## B) Storage schema
+ 
+ ### Persisted (`browser.storage.local`)
+ Stored key: `settings` object. Source: `background.js` (`loadSettings`, `setSettings`, `resetSettings`).
+ 
+ Current normalized fields (with defaults in `DEFAULT_SETTINGS`):
+ - `LLAMA_SERVER` (string)
+ - `TARGET_LANG` (string)
+ - `MAX_TOKENS` (number)
+ - `TEMPERATURE` (number)
+ - `RETRY_TEMP` (number)
+-- `IMG_MAX_DIM` (number)
+ - `REPEAT_PENALTY` (number)
+ - `REPEAT_LAST_N` (number)
+ - `FREQUENCY_PENALTY` (number)
+ - `PRESENCE_PENALTY` (number)
+ - `DRY_MULTIPLIER` (number)
+ - `DRY_BASE` (number)
+ - `DRY_ALLOWED_LENGTH` (number)
+ - `DRY_PENALTY_LAST_N` (number)
+ - `LOOP_THRESHOLD` (number)
+ - `RETROACTIVE_CONTEXT` (boolean)
+ Source: `background.js` (`DEFAULT_SETTINGS`, `normalizeSettings`), UI exposure in `content.js` (`openSettingsModal`).
+ 
+ ### In-memory only (per current code)
+ - `globalInstructions` (cross-tab until restart). Source: `background.js` (`globalInstructions`, `setGlobalInstructions`/`clearGlobalInstructions`).
+ - `tabState[tabId]`, `pageHistory[tabId]`, `storyRegistry[tabId]`. Source: `background.js` (same-named objects + `browser.tabs.onRemoved`).
+ - TODO: confirm whether any of these should be persisted across restart (currently they are not).

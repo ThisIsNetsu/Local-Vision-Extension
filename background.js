@@ -5,15 +5,13 @@ const DEFAULT_SETTINGS = {
   LLAMA_SERVER: "http://127.0.0.1:8033",
   TARGET_LANG: "English",
   MAX_TOKENS: 2048,
-  TEMPERATURE: 0.7,
-  RETRY_TEMP: 0.7,
+  TEMPERATURE: 0.25,
+  RETRY_TEMP: 0.2,
   OCR_TEMPERATURE: 0,
   OCR_TOP_P: 1,
   OCR_TOP_K: 0,
-  TRANSLATION_TEMPERATURE: 0.7,
-  TRANSLATION_TOP_P: 0.8,
-  TRANSLATION_TOP_K: 20,
-  TRANSLATION_MIN_P: 0,
+  TRANSLATION_TEMPERATURE: 0.25,
+  TRANSLATION_MIN_P: 0.05,
   IMG_MAX_DIM: 4096,
   REPEAT_PENALTY: 1.15,
   REPEAT_LAST_N: 256,
@@ -52,8 +50,6 @@ function normalizeSettings(next) {
   } else if ("TEMPERATURE" in next) {
     out.TRANSLATION_TEMPERATURE = clampNum(next.TEMPERATURE, DEFAULT_SETTINGS.TRANSLATION_TEMPERATURE, 0, 2);
   }
-  if ("TRANSLATION_TOP_P" in next) out.TRANSLATION_TOP_P = clampNum(next.TRANSLATION_TOP_P, DEFAULT_SETTINGS.TRANSLATION_TOP_P, 0, 1);
-  if ("TRANSLATION_TOP_K" in next) out.TRANSLATION_TOP_K = clampNum(next.TRANSLATION_TOP_K, DEFAULT_SETTINGS.TRANSLATION_TOP_K, 0, 200);
   if ("TRANSLATION_MIN_P" in next) out.TRANSLATION_MIN_P = clampNum(next.TRANSLATION_MIN_P, DEFAULT_SETTINGS.TRANSLATION_MIN_P, 0, 1);
   if ("REPEAT_PENALTY" in next) out.REPEAT_PENALTY = clampNum(next.REPEAT_PENALTY, DEFAULT_SETTINGS.REPEAT_PENALTY, 0.8, 2.0);
   if ("REPEAT_LAST_N" in next) out.REPEAT_LAST_N = clampNum(next.REPEAT_LAST_N, DEFAULT_SETTINGS.REPEAT_LAST_N, -1, 4096);
@@ -68,17 +64,11 @@ function normalizeSettings(next) {
   return out;
 }
 
-function getTranslationSampling(temperature) {
+function getDeterministicSampling(temperature) {
   return {
     temperature,
-    top_p: settings.TRANSLATION_TOP_P,
-    top_k: settings.TRANSLATION_TOP_K,
-  };
-}
-
-function getNonThinkingOptions() {
-  return {
-    chat_template_kwargs: { enable_thinking: false }
+    top_p: 1,
+    top_k: 0,
   };
 }
 
@@ -297,8 +287,7 @@ async function updateStoryRegistry(tabId, analysis, filteredTranslation, userNot
         messages: [{ role: "user", content: prompt }],
         temperature: 0.3,
         max_tokens: 300,
-        stream: false,
-        ...getNonThinkingOptions(),
+        stream: false
       })
     });
     const data = await res.json();
@@ -361,8 +350,7 @@ Return JSON only.`;
       ],
       temperature: 0.2,
       max_tokens: 500,
-      stream: false,
-      ...getNonThinkingOptions(),
+      stream: false
     })
   });
   if (!res.ok) return null;
@@ -445,8 +433,7 @@ Output ONLY the compacted entry.`;
       ],
       temperature: 0.2,
       max_tokens: 200,
-      stream: false,
-      ...getNonThinkingOptions(),
+      stream: false
     })
   });
   if (!res.ok) return null;
@@ -657,10 +644,6 @@ browser.contextMenus.create({
   id: "vision-select-translate", title: "🔍 Select & Translate Region", contexts: ["image"],
 });
 
-browser.contextMenus.create({
-  id: "vision-translate-selected-text", title: "📝 Translate Selected Text", contexts: ["selection"],
-});
-
 browser.contextMenus.onClicked.addListener(async (info, tab) => {
   const imageUrl = info.srcUrl;
   const pageUrl  = info.pageUrl || "";
@@ -668,47 +651,6 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "vision-select-translate") {
     try { await tell(tab.id, { action: "showSelector", imageUrl, pageUrl }); }
     catch { await browser.tabs.executeScript(tab.id, { file: "content.js" }); await tell(tab.id, { action: "showSelector", imageUrl, pageUrl }); }
-  }
-
-  if (info.menuItemId === "vision-translate-selected-text") {
-    const selectedText = (info.selectionText || "").trim();
-    if (!selectedText) return;
-    try {
-      const result = await handleTranslateSelectedText(selectedText, tab.id);
-      try {
-        await tell(tab.id, {
-          action: "showTextTranslation",
-          original: selectedText,
-          translation: result.translation,
-        });
-      } catch {
-        await browser.tabs.executeScript(tab.id, { file: "content.js" });
-        await tell(tab.id, {
-          action: "showTextTranslation",
-          original: selectedText,
-          translation: result.translation,
-        });
-      }
-    } catch (err) {
-      try {
-        await tell(tab.id, { action: "error", message: friendlyError(err) });
-      } catch {
-        await browser.tabs.executeScript(tab.id, { file: "content.js" });
-        await tell(tab.id, { action: "error", message: friendlyError(err) });
-      }
-    }
-  }
-});
-
-browser.browserAction.onClicked.addListener(async (tab) => {
-  if (!tab?.id) return;
-  try {
-    await tell(tab.id, { action: "reopenOverlay" });
-  } catch {
-    try {
-      await browser.tabs.executeScript(tab.id, { file: "content.js" });
-      await tell(tab.id, { action: "reopenOverlay" });
-    } catch {}
   }
 });
 
@@ -954,46 +896,8 @@ async function handleRetranslate(original, style, tabId) {
       max_tokens: 512,
       temperature: 0.15,
       stream: false,
-      ...getNonThinkingOptions(),
     }),
   });
-  if (!res.ok) throw new Error("Server " + res.status);
-  const data = await res.json();
-  let text = data.choices?.[0]?.message?.content || "";
-  text = cleanOutput(text);
-  return { translation: text };
-}
-
-async function handleTranslateSelectedText(original, tabId) {
-  const targetLang = getTargetLang();
-  const styleId = getStyleId(tabId);
-  const stylePrompt = STYLE_PROFILES[styleId]?.prompt || "";
-  const history = buildHistoryPrefix(tabId);
-
-  const userParts = [];
-  if (globalInstructions) userParts.push("GLOBAL INSTRUCTIONS:\n" + globalInstructions);
-  if (stylePrompt) userParts.push("STYLE PROFILE:\n" + stylePrompt);
-  if (history) userParts.push(history.trim());
-  userParts.push("Translate this text into " + targetLang + ":\n" + original);
-
-  const res = await fetch(settings.LLAMA_SERVER + "/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert translator. Output only the translation text with no explanations or labels.",
-        },
-        { role: "user", content: userParts.join("\n\n") },
-      ],
-      max_tokens: 512,
-      temperature: 0.2,
-      stream: false,
-      ...getNonThinkingOptions(),
-    }),
-  });
-
   if (!res.ok) throw new Error("Server " + res.status);
   const data = await res.json();
   let text = data.choices?.[0]?.message?.content || "";
@@ -1032,7 +936,6 @@ Output ONLY the revised translated text, no labels.`;
       max_tokens: 256,
       temperature: 0.2,
       stream: false,
-      ...getNonThinkingOptions(),
     }),
   });
   if (!res.ok) throw new Error("Server " + res.status);
@@ -1074,7 +977,6 @@ Should this become a global instruction?`;
       max_tokens: 80,
       temperature: 0.2,
       stream: false,
-      ...getNonThinkingOptions(),
     }),
   });
   if (!res.ok) return;
@@ -1120,7 +1022,6 @@ async function analyseScene(base64Url, tabId) {
       top_p: settings.OCR_TOP_P,
       top_k: settings.OCR_TOP_K,
       stream: false,
-      ...getNonThinkingOptions(),
     }),
   });
   if (!res.ok) throw new Error("Analysis failed: " + res.status);
@@ -1390,9 +1291,8 @@ async function streamTranslation(base64Url, tabId, isRetry, analysisBase64Url) {
       ]},
     ],
     max_tokens: settings.MAX_TOKENS,
-    ...getTranslationSampling(isRetry ? settings.RETRY_TEMP : (settings.TRANSLATION_TEMPERATURE ?? settings.TEMPERATURE)),
+    ...getDeterministicSampling(isRetry ? settings.RETRY_TEMP : (settings.TRANSLATION_TEMPERATURE ?? settings.TEMPERATURE)),
     min_p: settings.TRANSLATION_MIN_P,
-    ...getNonThinkingOptions(),
     stream: true,
     repeat_penalty: settings.REPEAT_PENALTY,
     repeat_last_n: settings.REPEAT_LAST_N,

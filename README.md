@@ -1,6 +1,6 @@
 # VisionTranslate (Local Vision Extension)
 
-VisionTranslate is a Firefox extension that translates text found inside images (such as manga, manhwa, and manhua pages) by sending a selected image region to a local `llama.cpp` vision model server. It adds context-menu options for both image-region and selected-text translation, renders an overlay with translations, and includes tools to refine and re-run translations without leaving the page.
+VisionTranslate is a Firefox extension that translates text found inside images (such as manga, manhwa, and manhua pages) by sending a selected image region to a local `llama.cpp` vision model server. It adds a context-menu option to select a region, renders an overlay with translations, and includes tools to refine and re-run translations without leaving the page.
 
 > Status: Alpha. The project is under active development and behavior may change between updates.
 
@@ -13,7 +13,6 @@ VisionTranslate is a Firefox extension that translates text found inside images 
 ## Features
 
 - **Region selection**: draw a rectangle over any image area to translate only that portion.
-- **Selected text translation**: translate highlighted page text directly from the right-click menu.
 - **Translation overlay**: categorized output (Dialogue, Narration, SFX, Sign, Text) with streaming updates.
 - **Retranslation tools**:
   - Right-click a line for Standard / Literal / Natural retranslation.
@@ -28,7 +27,7 @@ VisionTranslate is a Firefox extension that translates text found inside images 
 
 - **Browser**: Firefox (Manifest V2 with `browser.*` APIs).
   - Chromium-based browsers will require MV3 migration and a polyfill.
-- **Local model server**: `llama.cpp` running on `http://127.0.0.1:8033` with a vision-capable model (the prompts/settings are tuned for Qwen3.5 in non-thinking mode).
+- **Local model server**: `llama.cpp` running on `http://127.0.0.1:8033` with a vision-capable model (the prompts are optimized for Qwen3-VL style models).
 
 ### llama.cpp server expectations
 
@@ -52,10 +51,6 @@ The extension sends OpenAI-style `/v1/chat/completions` requests that include `i
 3. Draw a rectangle around the text you want translated.
 4. Review the translation in the overlay and adjust as needed.
 
-For text-only translation: highlight text on the page, right-click, and choose **📝 Translate Selected Text**.
-
-Tip: click the extension toolbar button to reopen the overlay if you closed it accidentally.
-
 ### Overlay controls
 
 - **Analysis toggle**: enable/disable scene analysis.
@@ -76,7 +71,7 @@ Key settings live in the overlay **Settings** menu (⚙) and are persisted:
 
 - `LLAMA_SERVER`: server URL (default `http://127.0.0.1:8033`).
 - `TARGET_LANG`: output language (default `English`).
-- `MAX_TOKENS`, `TRANSLATION_TEMPERATURE`, `TRANSLATION_TOP_P`, `TRANSLATION_TOP_K`, `TRANSLATION_MIN_P`, and penalties: model tuning values.
+- `MAX_TOKENS`, `TEMPERATURE`, penalties: model tuning values.
 
 You can also edit prompt text and style profiles inside `background.js`.
 
